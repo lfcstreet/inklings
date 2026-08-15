@@ -92,7 +92,7 @@ There is no Open/Reopen function.
 - [ ] 04 - Hide lines more than two visual lines above cursor
 - [ ] 05 - Markdown file creation
 - [ ] 06 - Timestamp-based filenames
-- [ ] 07 - Markdown templates
+- [ ] 07 - Markdown templatesd
 - [ ] 08 - Configurable storage directories
 - [ ] 09 - Automatic save every 2 minutes
 - [ ] 10 - Session timing
