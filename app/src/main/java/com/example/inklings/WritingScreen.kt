@@ -161,7 +161,7 @@ fun WritingScreen(
                         .padding(horizontal = 16.dp),
                     textStyle = TextStyle(
                         fontFamily = CourierPrime,
-                        fontSize = 18.sp,
+                        fontSize = 22.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     ),
                     visualTransformation = typewriterTransformation,
