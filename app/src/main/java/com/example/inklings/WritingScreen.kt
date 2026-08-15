@@ -152,12 +152,12 @@ fun WritingScreen() {
                             val cursorIndex = selection.start
                             val lineIndex = layout.getLineForOffset(cursorIndex)
                             
-                            // Start of writing window: 2 lines above
-                            val windowStartLine = maxOf(0, lineIndex - 2)
+                            // Start of writing window: 1 line above
+                            val windowStartLine = maxOf(0, lineIndex - 1)
                             hiddenStartOffset = layout.getLineStart(windowStartLine)
                             
-                            // End of writing window: 2 lines below
-                            val windowEndLine = minOf(layout.lineCount - 1, lineIndex + 2)
+                            // End of writing window: 1 line below
+                            val windowEndLine = minOf(layout.lineCount - 1, lineIndex + 1)
                             hiddenEndOffset = layout.getLineEnd(windowEndLine)
                         } else {
                             // Show all text during selection
