@@ -1,5 +1,6 @@
 package com.example.inklings
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -37,13 +39,12 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.inklings.ui.theme.CourierPrime
 
 @Composable
-fun WritingScreen() {
-    var textFieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(""))
-    }
+fun WritingScreen(viewModel: WritingViewModel = viewModel()) {
+    val textFieldValue = viewModel.textFieldValue
     val scrollState = rememberScrollState()
     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
     
@@ -53,6 +54,21 @@ fun WritingScreen() {
     var hiddenEndOffset by remember { mutableIntStateOf(0) }
     
     val density = LocalDensity.current
+    val context = LocalContext.current
+
+    // Observe save results
+    LaunchedEffect(Unit) {
+        viewModel.saveResult.collect { result ->
+            when (result) {
+                is WritingViewModel.SaveResult.Success -> {
+                    Toast.makeText(context, "Saved: ${result.fileName}", Toast.LENGTH_SHORT).show()
+                }
+                is WritingViewModel.SaveResult.Error -> {
+                    Toast.makeText(context, "Save Error: ${result.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     // Detect transition to Browsing Mode (manual scrolling)
     LaunchedEffect(scrollState.isScrollInProgress) {
@@ -98,7 +114,7 @@ fun WritingScreen() {
                     .navigationBarsPadding()
                     .padding(8.dp)
             ) {
-                TextButton(onClick = { /* TODO: Save */ }) {
+                TextButton(onClick = { viewModel.save() }) {
                     Text("SAVE")
                 }
                 TextButton(onClick = { /* TODO: New */ }) {
@@ -132,7 +148,7 @@ fun WritingScreen() {
                         if (newValue.text != textFieldValue.text) {
                             isDistractionFreeMode = true
                         }
-                        textFieldValue = newValue
+                        viewModel.updateText(newValue)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -146,7 +162,7 @@ fun WritingScreen() {
                     onTextLayout = { layout ->
                         textLayoutResult = layout
                         
-                        // Calculate writing window (2 lines above, current, 2 lines below)
+                        // Calculate writing window (1 line above, current, 1 line below)
                         val selection = textFieldValue.selection
                         if (selection.collapsed) {
                             val cursorIndex = selection.start
