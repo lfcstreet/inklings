@@ -13,31 +13,51 @@ import kotlinx.coroutines.launch
 
 class WritingViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val sessionManager = SessionManager(application)
+    private var sessionManager = SessionManager(application)
 
     var textFieldValue by mutableStateOf(TextFieldValue(""))
         private set
 
-    private val _saveResult = MutableSharedFlow<SaveResult>()
-    val saveResult = _saveResult.asSharedFlow()
+    private val _uiEvent = MutableSharedFlow<UiEvent>()
+    val uiEvent = _uiEvent.asSharedFlow()
 
     fun updateText(newValue: TextFieldValue) {
         textFieldValue = newValue
     }
 
-    fun save() {
+    fun save(onSuccess: (() -> Unit)? = null) {
         viewModelScope.launch {
             val result = sessionManager.saveDocument(textFieldValue.text)
             if (result.isSuccess) {
-                _saveResult.emit(SaveResult.Success(sessionManager.sessionFileName))
+                _uiEvent.emit(UiEvent.ShowToast("Saved: ${sessionManager.sessionFileName}"))
+                onSuccess?.invoke()
             } else {
-                _saveResult.emit(SaveResult.Error(result.exceptionOrNull()?.message ?: "Unknown error"))
+                _uiEvent.emit(UiEvent.ShowError("Save Error: ${result.exceptionOrNull()?.message ?: "Unknown error"}"))
             }
         }
     }
 
-    sealed class SaveResult {
-        data class Success(val fileName: String) : SaveResult()
-        data class Error(val message: String) : SaveResult()
+    fun newSession() {
+        save(onSuccess = {
+            sessionManager = SessionManager(getApplication())
+            textFieldValue = TextFieldValue("")
+            viewModelScope.launch {
+                _uiEvent.emit(UiEvent.ShowToast("New session started"))
+            }
+        })
+    }
+
+    fun closeSession() {
+        save(onSuccess = {
+            viewModelScope.launch {
+                _uiEvent.emit(UiEvent.CloseApp)
+            }
+        })
+    }
+
+    sealed class UiEvent {
+        data class ShowToast(val message: String) : UiEvent()
+        data class ShowError(val message: String) : UiEvent()
+        object CloseApp : UiEvent()
     }
 }

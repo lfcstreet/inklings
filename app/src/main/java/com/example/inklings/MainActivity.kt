@@ -14,7 +14,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             InklingsTheme {
-                WritingScreen()
+                WritingScreen(onCloseApp = { finish() })
             }
         }
     }

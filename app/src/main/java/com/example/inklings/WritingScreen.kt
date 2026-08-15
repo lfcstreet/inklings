@@ -43,7 +43,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.inklings.ui.theme.CourierPrime
 
 @Composable
-fun WritingScreen(viewModel: WritingViewModel = viewModel()) {
+fun WritingScreen(
+    viewModel: WritingViewModel = viewModel(),
+    onCloseApp: () -> Unit = {}
+) {
     val textFieldValue = viewModel.textFieldValue
     val scrollState = rememberScrollState()
     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -56,15 +59,18 @@ fun WritingScreen(viewModel: WritingViewModel = viewModel()) {
     val density = LocalDensity.current
     val context = LocalContext.current
 
-    // Observe save results
+    // Observe UI events
     LaunchedEffect(Unit) {
-        viewModel.saveResult.collect { result ->
-            when (result) {
-                is WritingViewModel.SaveResult.Success -> {
-                    Toast.makeText(context, "Saved: ${result.fileName}", Toast.LENGTH_SHORT).show()
+        viewModel.uiEvent.collect { event ->
+            when (event) {
+                is WritingViewModel.UiEvent.ShowToast -> {
+                    Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
                 }
-                is WritingViewModel.SaveResult.Error -> {
-                    Toast.makeText(context, "Save Error: ${result.message}", Toast.LENGTH_LONG).show()
+                is WritingViewModel.UiEvent.ShowError -> {
+                    Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()
+                }
+                is WritingViewModel.UiEvent.CloseApp -> {
+                    onCloseApp()
                 }
             }
         }
@@ -117,10 +123,10 @@ fun WritingScreen(viewModel: WritingViewModel = viewModel()) {
                 TextButton(onClick = { viewModel.save() }) {
                     Text("SAVE")
                 }
-                TextButton(onClick = { /* TODO: New */ }) {
+                TextButton(onClick = { viewModel.newSession() }) {
                     Text("NEW")
                 }
-                TextButton(onClick = { /* TODO: Close */ }) {
+                TextButton(onClick = { viewModel.closeSession() }) {
                     Text("CLOSE")
                 }
             }
