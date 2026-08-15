@@ -28,23 +28,57 @@ class SessionManager(private val context: Context) {
     fun saveDocument(content: String): Result<Unit> {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                saveWithMediaStore(content)
+                saveWithMediaStore(content, relativePath, sessionFileName, isDocument = true)
             } else {
-                saveWithLegacyStorage(content)
+                saveWithLegacyStorage(content, relativePath, sessionFileName)
             }
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    private fun saveWithMediaStore(content: String): Result<Unit> {
+    fun saveTimeLog(minutes: Int): Result<Unit> {
+        return try {
+            val now = Date()
+            val yearFormat = SimpleDateFormat("yyyy", Locale.US)
+            val monthFormat = SimpleDateFormat("MM", Locale.US)
+            val fileTimestampFormat = SimpleDateFormat("yyyy-MM-dd - HH-mm-ss", Locale.US)
+            
+            val year = yearFormat.format(now)
+            val month = monthFormat.format(now)
+            val fileTimestamp = fileTimestampFormat.format(now)
+            
+            val logRelativePath = "Documents/Inklings/99 Operations/99 Log/$year/$month"
+            val logFileName = "BAS-$fileTimestamp.md"
+            val content = "dailying:: $minutes"
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                saveWithMediaStore(content, logRelativePath, logFileName, isDocument = false)
+            } else {
+                saveWithLegacyStorage(content, logRelativePath, logFileName)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun saveWithMediaStore(
+        content: String,
+        path: String,
+        fileName: String,
+        isDocument: Boolean
+    ): Result<Unit> {
         val resolver = context.contentResolver
         
-        // Check if we already have a URI for this session
-        val uri = sessionUri ?: findExistingUri(sessionFileName) ?: createNewUri(sessionFileName)
+        // Track sessionUri only for the main document
+        val uri = if (isDocument) {
+            sessionUri ?: findExistingUri(fileName, path) ?: createNewUri(fileName, path)
+        } else {
+            createNewUri(fileName, path)
+        }
         
         return if (uri != null) {
-            sessionUri = uri
+            if (isDocument) sessionUri = uri
             resolver.openOutputStream(uri, "wt")?.use { outputStream ->
                 outputStream.write(content.toByteArray(Charsets.UTF_8))
                 Result.success(Unit)
@@ -54,9 +88,9 @@ class SessionManager(private val context: Context) {
         }
     }
 
-    private fun findExistingUri(fileName: String): Uri? {
+    private fun findExistingUri(fileName: String, path: String): Uri? {
         val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
-        val selectionArgs = arrayOf(fileName, "$relativePath/")
+        val selectionArgs = arrayOf(fileName, "$path/")
         val queryUri = MediaStore.Files.getContentUri("external")
         
         context.contentResolver.query(
@@ -74,22 +108,22 @@ class SessionManager(private val context: Context) {
         return null
     }
 
-    private fun createNewUri(fileName: String): Uri? {
+    private fun createNewUri(fileName: String, path: String): Uri? {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
             put(MediaStore.MediaColumns.MIME_TYPE, "text/markdown")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, path)
         }
         return context.contentResolver.insert(MediaStore.Files.getContentUri("external"), values)
     }
 
-    private fun saveWithLegacyStorage(content: String): Result<Unit> {
-        val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        val inklingsDir = File(documentsDir, "Inklings/08 Dailies/01 Inbox")
-        if (!inklingsDir.exists()) {
-            inklingsDir.mkdirs()
+    private fun saveWithLegacyStorage(content: String, path: String, fileName: String): Result<Unit> {
+        val rootDir = Environment.getExternalStorageDirectory()
+        val targetDir = File(rootDir, path)
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
         }
-        val file = File(inklingsDir, sessionFileName)
+        val file = File(targetDir, fileName)
         file.writeText(content, Charsets.UTF_8)
         return Result.success(Unit)
     }
