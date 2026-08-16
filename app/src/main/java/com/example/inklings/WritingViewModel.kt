@@ -2,6 +2,7 @@ package com.example.inklings
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.KeyEvent
@@ -14,11 +15,14 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+enum class TimerState { STOPPED, RUNNING, PAUSED, COMPLETED }
 
 class WritingViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -33,7 +37,20 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     var isSoundEnabled by mutableStateOf(settingsManager.isTypewriterSoundEnabled)
         private set
 
-    // Timing state
+    // Timer state (Requirement 15)
+    var timerState by mutableStateOf(TimerState.STOPPED)
+        private set
+    var remainingTimeMillis by mutableLongStateOf(settingsManager.timerDurationMinutes * 60 * 1000L)
+        private set
+    var totalDurationMillis by mutableLongStateOf(settingsManager.timerDurationMinutes * 60 * 1000L)
+        private set
+    private var timerJob: Job? = null
+
+    // UI Events for completion flash
+    private val _showCompletionFlash = MutableSharedFlow<Unit>()
+    val showCompletionFlash = _showCompletionFlash.asSharedFlow()
+
+    // Timing state (Writing Time Log)
     private var totalAccumulatedMillis = 0L
     private var currentPeriodStartMillis: Long? = null
     private var lastActivityMillis: Long? = null
@@ -265,6 +282,10 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
                     lastActivityMillis = null
                     isPendingPhysicalCapitalization = true
                     expectedPhysicalCapOffset = 0
+                    
+                    // Requirement 15: Reset timer for new session
+                    resetTimer()
+                    
                     if (!silent) {
                         _uiEvent.emit(UiEvent.ShowToast("New session started"))
                     }
@@ -288,6 +309,59 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
             }
         }
     }
+
+    // Timer functions (Requirement 15)
+    fun toggleTimer() {
+        when (timerState) {
+            TimerState.RUNNING -> pauseTimer()
+            else -> startTimer()
+        }
+    }
+
+    private fun startTimer() {
+        if (timerState == TimerState.COMPLETED || remainingTimeMillis <= 0L) {
+            resetTimer()
+        }
+        timerState = TimerState.RUNNING
+        val initialRemaining = remainingTimeMillis
+        val startTime = System.currentTimeMillis()
+        
+        timerJob?.cancel()
+        timerJob = viewModelScope.launch {
+            while (isActive && timerState == TimerState.RUNNING) {
+                val elapsed = System.currentTimeMillis() - startTime
+                remainingTimeMillis = (initialRemaining - elapsed).coerceAtLeast(0L)
+                
+                if (remainingTimeMillis <= 0L) {
+                    timerState = TimerState.COMPLETED
+                    _showCompletionFlash.emit(Unit)
+                    break
+                }
+                delay(100) 
+            }
+        }
+    }
+
+    private fun pauseTimer() {
+        timerState = TimerState.PAUSED
+        timerJob?.cancel()
+    }
+
+    fun resetTimer() {
+        timerState = TimerState.STOPPED
+        timerJob?.cancel()
+        totalDurationMillis = settingsManager.timerDurationMinutes * 60 * 1000L
+        remainingTimeMillis = totalDurationMillis
+    }
+
+    fun setTimerDuration(minutes: Int) {
+        settingsManager.timerDurationMinutes = minutes
+        if (timerState == TimerState.STOPPED || timerState == TimerState.COMPLETED) {
+            resetTimer()
+        }
+    }
+
+    fun getTimerDuration(): Int = settingsManager.timerDurationMinutes
 
     fun toggleSound() {
         isSoundEnabled = !isSoundEnabled

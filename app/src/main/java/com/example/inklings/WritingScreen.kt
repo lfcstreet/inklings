@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -34,13 +35,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,6 +58,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onKeyEvent
@@ -72,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.inklings.ui.theme.CourierPrime
+import kotlinx.coroutines.delay
 
 // Requirement 10C: Fade behavior is modularized.
 // Requirement 10A (Progressive Line Fade) is intentionally retained and available for future reuse.
@@ -125,6 +134,16 @@ fun WritingScreen(
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface
     val primaryColor = MaterialTheme.colorScheme.primary
 
+    // Requirement 15: Timer completion state (replaces flash with red color for 2s)
+    var isTimerCompletionColorActive by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        viewModel.showCompletionFlash.collect {
+            isTimerCompletionColorActive = true
+            delay(5000)
+            isTimerCompletionColorActive = false
+        }
+    }
+
     // Observe UI events
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collect { event ->
@@ -150,11 +169,14 @@ fun WritingScreen(
     }
 
     // Visual transformation to apply calculated alphas
-    val fadeTransformation = remember(isDistractionFreeMode, visibleRanges, onSurfaceColor) {
+    val fadeTransformation = remember(isDistractionFreeMode, visibleRanges, onSurfaceColor, isTimerCompletionColorActive) {
         VisualTransformation { text ->
             val annotated = buildAnnotatedString {
                 append(text.text)
-                if (isDistractionFreeMode && visibleRanges.isNotEmpty()) {
+                if (isTimerCompletionColorActive) {
+                    // Requirement 15: Color entire text red on completion
+                    addStyle(SpanStyle(color = Color.Red), 0, text.length)
+                } else if (isDistractionFreeMode && visibleRanges.isNotEmpty()) {
                     val len = text.length
                     // Everything outside calculated ranges is invisible
                     addStyle(SpanStyle(color = Color.Transparent), 0, len)
@@ -367,7 +389,27 @@ fun WritingScreen(
                 }
             }
 
-            // Settings Panel Overlay (Requirement 14)
+            // Timer Action Button (Requirement 15)
+            // Positioned independently on the right side center.
+            AnimatedVisibility(
+                visible = showActionButtons,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 16.dp)
+            ) {
+                TimerButton(
+                    state = viewModel.timerState,
+                    remainingMillis = viewModel.remainingTimeMillis,
+                    totalMillis = viewModel.totalDurationMillis,
+                    onToggle = { viewModel.toggleTimer() },
+                    onReset = { viewModel.resetTimer() },
+                    tint = primaryColor
+                )
+            }
+
+            // Settings Panel Overlay (Requirement 14 & 15)
             AnimatedVisibility(
                 visible = showSettingsPanel && showActionButtons,
                 enter = fadeIn(),
@@ -392,20 +434,43 @@ fun WritingScreen(
                             detectTapGestures { } // Prevent closing when tapping inside
                         }
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Text(
-                            text = "Typewriter Sounds",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = onSurfaceColor,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Switch(
-                            checked = viewModel.isSoundEnabled,
-                            onCheckedChange = { viewModel.toggleSound() }
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                text = "Typewriter Sounds",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = onSurfaceColor,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Switch(
+                                checked = viewModel.isSoundEnabled,
+                                onCheckedChange = { viewModel.toggleSound() }
+                            )
+                        }
+                        
+                        // Requirement 15: Timer Duration
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                text = "Timer Duration",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = onSurfaceColor,
+                                fontWeight = FontWeight.Bold
+                            )
+                            TimerDurationSelector(
+                                currentMinutes = viewModel.getTimerDuration(),
+                                onMinutesSelected = { 
+                                    viewModel.setTimerDuration(it)
+                                    showSettingsPanel = false
+                                },
+                                tint = primaryColor
+                            )
+                        }
                     }
                 }
             }
@@ -464,6 +529,113 @@ fun ActionButton(
             modifier = Modifier.size(24.dp),
             tint = tint
         )
+    }
+}
+
+/**
+ * Requirement 15: Timer Action Button with circular progress and countdown text.
+ */
+@Composable
+fun TimerButton(
+    state: TimerState,
+    remainingMillis: Long,
+    totalMillis: Long,
+    onToggle: () -> Unit,
+    onReset: () -> Unit,
+    tint: Color
+) {
+    val minutes = (remainingMillis / 1000) / 60
+    val seconds = (remainingMillis / 1000) % 60
+    val timeText = "%02d:%02d".format(minutes, seconds)
+    val progress = if (totalMillis > 0) remainingMillis.toFloat() / totalMillis else 1f
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.pointerInput(Unit) {
+            detectTapGestures(
+                onTap = { onToggle() },
+                onLongPress = { onReset() }
+            )
+        }
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .border(2.dp, tint.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.size(44.dp),
+                color = tint,
+                strokeWidth = 4.dp,
+                trackColor = Color.Transparent,
+            )
+            Icon(
+                imageVector = if (state == TimerState.RUNNING) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                contentDescription = if (state == TimerState.RUNNING) "PAUSE" else "PLAY",
+                tint = tint,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Text(
+            text = timeText,
+            style = MaterialTheme.typography.labelMedium,
+            color = tint,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+/**
+ * Requirement 15: Dropdown selector for Timer Duration.
+ */
+@Composable
+fun TimerDurationSelector(
+    currentMinutes: Int,
+    onMinutesSelected: (Int) -> Unit,
+    tint: Color
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val durations = listOf(1, 10, 15, 30, 45, 60)
+
+    Box {
+        Row(
+            modifier = Modifier
+                .border(1.dp, tint.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                .clickable { expanded = true }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "$currentMinutes minutes",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Outlined.Settings, // Using settings icon as a generic arrow placeholder for now
+                contentDescription = "Select",
+                modifier = Modifier.size(16.dp),
+                tint = tint
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+        ) {
+            durations.forEach { minutes ->
+                DropdownMenuItem(
+                    text = { Text("$minutes minutes") },
+                    onClick = {
+                        onMinutesSelected(minutes)
+                        expanded = false
+                    }
+                )
+            }
+        }
     }
 }
 
