@@ -84,6 +84,9 @@ fun WritingScreen(
     viewModel: WritingViewModel = viewModel(),
     onCloseApp: () -> Unit = {}
 ) {
+    // Requirement 12: Immersive full-screen mode is handled in MainActivity.
+    // The writing area expands to use the additional space provided by hiding system bars.
+    
     val textFieldValue = viewModel.textFieldValue
     val scrollState = rememberScrollState()
     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
