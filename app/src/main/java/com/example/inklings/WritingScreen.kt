@@ -35,11 +35,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
@@ -96,6 +98,9 @@ fun WritingScreen(
     
     // Requirement 11: Toggle visibility of action buttons
     var showActionButtons by rememberSaveable { mutableStateOf(false) }
+    
+    // Requirement 14: Toggle visibility of settings panel
+    var showSettingsPanel by rememberSaveable { mutableStateOf(false) }
     
     // Requirement 10C: Fade behavior is modularized.
     // Requirement 10A (Progressive Line Fade) is intentionally retained and available for future reuse.
@@ -188,7 +193,11 @@ fun WritingScreen(
                             val down = awaitFirstDown(pass = PointerEventPass.Initial)
                             val up = waitForUpOrCancellation(pass = PointerEventPass.Initial)
                             if (up != null && !scrollState.isScrollInProgress) {
-                                showActionButtons = !showActionButtons
+                                if (showSettingsPanel) {
+                                    showSettingsPanel = false
+                                } else {
+                                    showActionButtons = !showActionButtons
+                                }
                             }
                         }
                     }
@@ -206,6 +215,7 @@ fun WritingScreen(
                             if (newValue.text != textFieldValue.text) {
                                 isDistractionFreeMode = true
                                 showActionButtons = false // Requirement 11: Hide on typing
+                                showSettingsPanel = false // Requirement 14: Hide on typing
                             } else if (newValue.selection != textFieldValue.selection) {
                                 isDistractionFreeMode = false
                             }
@@ -301,7 +311,7 @@ fun WritingScreen(
                 }
             }
 
-            // Action Button Overlay (Requirement 11)
+            // Action Button Overlay (Requirement 11 & 14)
             AnimatedVisibility(
                 visible = showActionButtons,
                 enter = fadeIn(animationSpec = tween(300)) + slideInVertically(animationSpec = tween(300)) { -it / 2 },
@@ -345,6 +355,58 @@ fun WritingScreen(
                         },
                         tint = primaryColor
                     )
+                    // Requirement 14: Settings Button
+                    ActionButton(
+                        icon = Icons.Outlined.Settings,
+                        contentDescription = "SETTINGS",
+                        onClick = {
+                            showSettingsPanel = !showSettingsPanel
+                        },
+                        tint = primaryColor
+                    )
+                }
+            }
+
+            // Settings Panel Overlay (Requirement 14)
+            AnimatedVisibility(
+                visible = showSettingsPanel && showActionButtons,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 80.dp) // Below the action buttons
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = primaryColor.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .padding(16.dp)
+                        .pointerInput(Unit) {
+                            detectTapGestures { } // Prevent closing when tapping inside
+                        }
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "Typewriter Sounds",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = onSurfaceColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Switch(
+                            checked = viewModel.isSoundEnabled,
+                            onCheckedChange = { viewModel.toggleSound() }
+                        )
+                    }
                 }
             }
 

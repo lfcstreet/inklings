@@ -23,9 +23,14 @@ import kotlinx.coroutines.launch
 class WritingViewModel(application: Application) : AndroidViewModel(application) {
 
     private var sessionManager = SessionManager(application)
+    private val soundManager = TypewriterSoundManager(application)
+    private val settingsManager = SettingsManager(application)
     private var lastSavedText = ""
 
     var textFieldValue by mutableStateOf(TextFieldValue(""))
+        private set
+
+    var isSoundEnabled by mutableStateOf(settingsManager.isTypewriterSoundEnabled)
         private set
 
     // Timing state
@@ -61,6 +66,35 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     fun updateText(newValue: TextFieldValue) {
         val oldText = textFieldValue.text
         val newText = newValue.text
+
+        // Requirement 14: Typewriter Sound Triggering
+        if (isSoundEnabled && newText != oldText) {
+            val selection = newValue.selection
+            if (selection.collapsed) {
+                val oldLen = oldText.length
+                val newLen = newText.length
+                
+                if (newLen == oldLen + 1) {
+                    // Single character insertion (Typing)
+                    val cursor = selection.start
+                    if (cursor > 0) {
+                        val char = newText[cursor - 1]
+                        if (char == ' ') {
+                            soundManager.playSpaceSound()
+                        } else {
+                            soundManager.playKeySound()
+                        }
+                    }
+                } else if (newLen < oldLen) {
+                    // Text length decreased (Deletion)
+                    // We only play sound if the user is not selecting a large block (Requirement says "Backspace")
+                    // BasicTextField handles Backspace as a decrease in length.
+                    // If old cursor was after some text and now it's before it, it's likely a delete.
+                    // For simplicity, any length decrease in collapsed selection is treated as backspace.
+                    soundManager.playBackspaceSound()
+                }
+            }
+        }
 
         if (newText.length > oldText.length) {
             isPendingPhysicalCapitalization = false
@@ -121,6 +155,9 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
                     text = newText,
                     selection = TextRange(selection.start + 1)
                 )
+                if (isSoundEnabled) {
+                    soundManager.playKeySound()
+                }
                 isPendingPhysicalCapitalization = false
                 trackActivity()
                 return true 
@@ -250,6 +287,16 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
                 _uiEvent.emit(UiEvent.ShowError("Save Error: ${docResult.exceptionOrNull()?.message ?: "Unknown error"}"))
             }
         }
+    }
+
+    fun toggleSound() {
+        isSoundEnabled = !isSoundEnabled
+        settingsManager.isTypewriterSoundEnabled = isSoundEnabled
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        soundManager.release()
     }
 
     sealed class UiEvent {
