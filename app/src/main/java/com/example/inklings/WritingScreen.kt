@@ -106,6 +106,10 @@ fun WritingScreen(
     // 2. Physical keyboard input may not receive IME sentence capitalization, so the application 
     //    provides equivalent capitalization for physical keyboard input via handlePhysicalKeyEvent.
     // 3. The double-space -> ". " transformation is a separate custom application feature.
+    // Requirement 13: 
+    // 1. Keyboard shortcuts (Ctrl+S, Ctrl+N, Ctrl+Q) intentionally invoke the same underlying 
+    //    actions as the corresponding UI icons.
+    // 2. Auto-save runs silently every 1 minute (handled in ViewModel).
     val activeFadeMode = FadeMode.SENTENCE_CORE_WITH_LINE_OUTER_FADE
     
     // State for visible character ranges and their alphas

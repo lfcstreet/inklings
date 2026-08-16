@@ -6,19 +6,24 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class WritingViewModel(application: Application) : AndroidViewModel(application) {
 
     private var sessionManager = SessionManager(application)
+    private var lastSavedText = ""
 
     var textFieldValue by mutableStateOf(TextFieldValue(""))
         private set
@@ -30,36 +35,43 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     private val IDLE_TIMEOUT_MILLIS = 10 * 60 * 1000L
 
     // Requirement 10D-FIX-02: Splitting capitalization responsibility.
-    // 1. Android's IME handles normal sentence capitalization for on-screen keyboard input.
-    //    (The editor is configured as normal sentence-based text input in WritingScreen.kt)
-    // 2. Physical keyboard input may not receive IME sentence capitalization, so
-    //    the application provides equivalent capitalization for physical keyboard input.
-    // No capitalization behavior is global to Android or other applications.
     private var isPendingPhysicalCapitalization = true 
     private var expectedPhysicalCapOffset = 0
 
     private val _uiEvent = MutableSharedFlow<UiEvent>()
     val uiEvent = _uiEvent.asSharedFlow()
 
+    init {
+        // Requirement 13: Silent auto-save every 1 minute
+        startAutoSaveLoop()
+    }
+
+    private fun startAutoSaveLoop() {
+        viewModelScope.launch {
+            while (isActive) {
+                delay(60 * 1000L)
+                val currentText = textFieldValue.text
+                if (currentText.isNotEmpty() && currentText != lastSavedText) {
+                    save(silent = true)
+                }
+            }
+        }
+    }
+
     fun updateText(newValue: TextFieldValue) {
         val oldText = textFieldValue.text
         val newText = newValue.text
 
-        // If text is inserted via onValueChange (indicating IME input), 
-        // we set isPendingPhysicalCapitalization = false to avoid double-processing.
-        // IME-provided text must not be passed through the physical-keyboard capitalization logic.
         if (newText.length > oldText.length) {
             isPendingPhysicalCapitalization = false
         }
         
-        // Reset state if user deletes text, uses selection, or moves cursor manually
         if (newText.length < oldText.length || 
             !newValue.selection.collapsed ||
             (isPendingPhysicalCapitalization && newValue.selection.start != expectedPhysicalCapOffset)) {
             isPendingPhysicalCapitalization = false
         }
 
-        // Apply double-space shortcut (Requirement 10D - custom application feature)
         val finalValue = handleDoubleSpace(newValue, textFieldValue)
         
         if (finalValue.text != textFieldValue.text) {
@@ -69,10 +81,30 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
-     * Requirement 10D-FIX-02: Manual capitalization for physical keyboards.
+     * Requirement 10D-FIX-02 & 13: Manual capitalization and shortcuts for physical keyboards.
      */
     fun handlePhysicalKeyEvent(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown) return false
+
+        // Requirement 13: Keyboard Shortcuts (Ctrl+S, Ctrl+N, Ctrl+Q)
+        // These intentionally invoke the same underlying actions as the UI icons.
+        if (event.isCtrlPressed) {
+            when (event.key) {
+                androidx.compose.ui.input.key.Key.S -> {
+                    save(silent = true)
+                    return true
+                }
+                androidx.compose.ui.input.key.Key.N -> {
+                    newSession(silent = true)
+                    return true
+                }
+                androidx.compose.ui.input.key.Key.Q -> {
+                    closeSession(silent = true)
+                    return true
+                }
+            }
+        }
+
         if (!isPendingPhysicalCapitalization) return false
         
         val codePoint = event.utf16CodePoint
@@ -82,7 +114,6 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         if (char.isLetter()) {
             val selection = textFieldValue.selection
             if (selection.collapsed && selection.start == expectedPhysicalCapOffset) {
-                // Manually insert capitalized character for physical keyboard
                 val oldText = textFieldValue.text
                 val capitalizedChar = char.uppercaseChar()
                 val newText = oldText.substring(0, selection.start) + capitalizedChar + oldText.substring(selection.start)
@@ -92,18 +123,14 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
                 )
                 isPendingPhysicalCapitalization = false
                 trackActivity()
-                return true // Consumed
+                return true 
             }
-        } else if (!char.isWhitespace()) {
-            // Non-alphabetic character: wait for the next letter
-            // updateText will handle the insertion and keeping flag true
         }
         
         return false
     }
 
     private fun handleDoubleSpace(new: TextFieldValue, old: TextFieldValue): TextFieldValue {
-        // Only trigger on single character insertion
         if (new.text.length != old.text.length + 1) return new
         
         val selection = new.selection
@@ -113,21 +140,14 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         if (cursor < 2) return new
 
         val text = new.text
-        // Check if the last two characters are spaces
         if (text[cursor - 1] == ' ' && text[cursor - 2] == ' ') {
             val charBeforeSpaces = if (cursor > 2) text[cursor - 3] else null
             
             if (charBeforeSpaces != null && charBeforeSpaces != '.' && charBeforeSpaces != ' ') {
                 val newText = text.substring(0, cursor - 2) + ". " + text.substring(cursor)
-                
-                // Requirement 10D-FIX-02: Enable physical capitalization for the next letter
                 isPendingPhysicalCapitalization = true
                 expectedPhysicalCapOffset = cursor
-                
-                return new.copy(
-                    text = newText,
-                    selection = TextRange(cursor)
-                )
+                return new.copy(text = newText, selection = TextRange(cursor))
             }
         }
         return new
@@ -166,11 +186,15 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         return (total / (60 * 1000L)).toInt()
     }
 
-    fun save(onSuccess: (() -> Unit)? = null) {
+    fun save(silent: Boolean = false, onSuccess: (() -> Unit)? = null) {
         viewModelScope.launch {
-            val result = sessionManager.saveDocument(textFieldValue.text)
+            val content = textFieldValue.text
+            val result = sessionManager.saveDocument(content)
             if (result.isSuccess) {
-                _uiEvent.emit(UiEvent.ShowToast("Saved: ${sessionManager.sessionFileName}"))
+                lastSavedText = content
+                if (!silent) {
+                    _uiEvent.emit(UiEvent.ShowToast("Saved: ${sessionManager.sessionFileName}"))
+                }
                 onSuccess?.invoke()
             } else {
                 _uiEvent.emit(UiEvent.ShowError("Save Error: ${result.exceptionOrNull()?.message ?: "Unknown error"}"))
@@ -190,7 +214,7 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         return true
     }
 
-    fun newSession() {
+    fun newSession(silent: Boolean = false) {
         viewModelScope.launch {
             val endTime = System.currentTimeMillis()
             val docResult = sessionManager.saveDocument(textFieldValue.text)
@@ -198,15 +222,15 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
                 if (finalizeAndSaveTimeLog(endTime)) {
                     sessionManager = SessionManager(getApplication())
                     textFieldValue = TextFieldValue("")
+                    lastSavedText = ""
                     totalAccumulatedMillis = 0L
                     currentPeriodStartMillis = null
                     lastActivityMillis = null
-                    
-                    // Requirement 10D-FIX-02: Reset capitalization state for new session
                     isPendingPhysicalCapitalization = true
                     expectedPhysicalCapOffset = 0
-                    
-                    _uiEvent.emit(UiEvent.ShowToast("New session started"))
+                    if (!silent) {
+                        _uiEvent.emit(UiEvent.ShowToast("New session started"))
+                    }
                 }
             } else {
                 _uiEvent.emit(UiEvent.ShowError("Save Error: ${docResult.exceptionOrNull()?.message ?: "Unknown error"}"))
@@ -214,7 +238,7 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun closeSession() {
+    fun closeSession(silent: Boolean = false) {
         viewModelScope.launch {
             val endTime = System.currentTimeMillis()
             val docResult = sessionManager.saveDocument(textFieldValue.text)
