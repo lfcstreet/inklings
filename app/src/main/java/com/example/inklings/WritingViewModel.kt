@@ -28,10 +28,40 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     val uiEvent = _uiEvent.asSharedFlow()
 
     fun updateText(newValue: TextFieldValue) {
-        if (newValue.text != textFieldValue.text) {
+        val processedValue = handleDoubleSpace(newValue, textFieldValue)
+        if (processedValue.text != textFieldValue.text) {
             trackActivity()
         }
-        textFieldValue = newValue
+        textFieldValue = processedValue
+    }
+
+    private fun handleDoubleSpace(new: TextFieldValue, old: TextFieldValue): TextFieldValue {
+        // Only trigger on single character insertion
+        if (new.text.length != old.text.length + 1) return new
+        
+        val selection = new.selection
+        if (!selection.collapsed) return new
+        
+        val cursor = selection.start
+        if (cursor < 2) return new
+
+        val text = new.text
+        // Check if the last two characters are spaces
+        if (text[cursor - 1] == ' ' && text[cursor - 2] == ' ') {
+            // Check what's before the two spaces
+            val charBeforeSpaces = if (cursor > 2) text[cursor - 3] else null
+            
+            // Don't trigger if it's the start of the doc (handled by cursor < 2)
+            // or if there's already a period or another space
+            if (charBeforeSpaces != null && charBeforeSpaces != '.' && charBeforeSpaces != ' ') {
+                val newText = text.substring(0, cursor - 2) + ". " + text.substring(cursor)
+                return new.copy(
+                    text = newText,
+                    selection = androidx.compose.ui.text.TextRange(cursor)
+                )
+            }
+        }
+        return new
     }
 
     private fun trackActivity() {

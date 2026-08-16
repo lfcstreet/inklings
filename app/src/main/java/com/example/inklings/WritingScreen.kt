@@ -51,13 +51,15 @@ fun WritingScreen(
     val scrollState = rememberScrollState()
     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
     
-    // Requirement 04: Mode tracking
+    // Mode tracking
     var isDistractionFreeMode by rememberSaveable { mutableStateOf(true) }
-    var hiddenStartOffset by remember { mutableIntStateOf(0) }
-    var hiddenEndOffset by remember { mutableIntStateOf(0) }
+    
+    // Requirement 10A: State for visible line ranges and their alphas
+    var visibleLineRanges by remember { mutableStateOf<List<Pair<IntRange, Float>>>(emptyList()) }
     
     val density = LocalDensity.current
     val context = LocalContext.current
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
 
     // Observe UI events
     LaunchedEffect(Unit) {
@@ -83,27 +85,23 @@ fun WritingScreen(
         }
     }
 
-    // Requirement 04: Visual transformation to hide text outside writing window
-    val typewriterTransformation = remember(isDistractionFreeMode, hiddenStartOffset, hiddenEndOffset) {
+    // Requirement 10A: Multi-level fading transformation with hard boundary at line 6
+    val fadeTransformation = remember(isDistractionFreeMode, visibleLineRanges, onSurfaceColor) {
         VisualTransformation { text ->
             val annotated = buildAnnotatedString {
                 append(text.text)
-                if (isDistractionFreeMode) {
-                    // Hide everything before the writing window
-                    if (hiddenStartOffset > 0) {
-                        addStyle(
-                            style = SpanStyle(color = Color.Transparent),
-                            start = 0,
-                            end = minOf(hiddenStartOffset, text.length)
-                        )
-                    }
-                    // Hide everything after the writing window
-                    if (hiddenEndOffset < text.length) {
-                        addStyle(
-                            style = SpanStyle(color = Color.Transparent),
-                            start = maxOf(0, hiddenEndOffset),
-                            end = text.length
-                        )
+                if (isDistractionFreeMode && visibleLineRanges.isNotEmpty()) {
+                    val len = text.length
+                    // Everything is invisible by default
+                    addStyle(SpanStyle(color = Color.Transparent), 0, len)
+                    
+                    // Apply alpha to specific line ranges
+                    visibleLineRanges.forEach { (range, alpha) ->
+                        val start = maxOf(0, range.first)
+                        val end = minOf(len, range.last)
+                        if (start < end) {
+                            addStyle(SpanStyle(color = onSurfaceColor.copy(alpha = alpha)), start, end)
+                        }
                     }
                 }
             }
@@ -150,41 +148,56 @@ fun WritingScreen(
                 BasicTextField(
                     value = textFieldValue,
                     onValueChange = { newValue ->
-                        // Detect transition to Distraction-Free Mode (actual editing)
                         if (newValue.text != textFieldValue.text) {
                             isDistractionFreeMode = true
+                        } else if (newValue.selection != textFieldValue.selection) {
+                            isDistractionFreeMode = false
                         }
                         viewModel.updateText(newValue)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 48.dp),
                     textStyle = TextStyle(
                         fontFamily = CourierPrime,
                         fontSize = 22.sp,
-                        color = MaterialTheme.colorScheme.onSurface
+                        lineHeight = 32.sp,
+                        color = onSurfaceColor
                     ),
-                    visualTransformation = typewriterTransformation,
+                    visualTransformation = fadeTransformation,
                     onTextLayout = { layout ->
                         textLayoutResult = layout
                         
-                        // Calculate writing window (1 line above, current, 1 line below)
                         val selection = textFieldValue.selection
                         if (selection.collapsed) {
                             val cursorIndex = selection.start
-                            val lineIndex = layout.getLineForOffset(cursorIndex)
+                            val currentLine = layout.getLineForOffset(cursorIndex)
                             
-                            // Start of writing window: 1 line above
-                            val windowStartLine = maxOf(0, lineIndex - 1)
-                            hiddenStartOffset = layout.getLineStart(windowStartLine)
-                            
-                            // End of writing window: 1 line below
-                            val windowEndLine = minOf(layout.lineCount - 1, lineIndex + 1)
-                            hiddenEndOffset = layout.getLineEnd(windowEndLine)
+                            // Calculate ranges for 5 lines above and 5 lines below
+                            val newRanges = mutableListOf<Pair<IntRange, Float>>()
+                            for (i in -5..5) {
+                                val lineIndex = currentLine + i
+                                if (lineIndex in 0 until layout.lineCount) {
+                                    val distance = Math.abs(i)
+                                    val alpha = when (distance) {
+                                        0 -> 1.0f
+                                        1 -> 0.8f
+                                        2 -> 0.6f
+                                        3 -> 0.4f
+                                        4 -> 0.2f
+                                        5 -> 0.1f
+                                        else -> 0.0f
+                                    }
+                                    if (alpha > 0f) {
+                                        val start = layout.getLineStart(lineIndex)
+                                        val end = layout.getLineEnd(lineIndex)
+                                        newRanges.add(IntRange(start, end) to alpha)
+                                    }
+                                }
+                            }
+                            visibleLineRanges = newRanges
                         } else {
-                            // Show all text during selection
-                            hiddenStartOffset = 0
-                            hiddenEndOffset = textFieldValue.text.length
+                            visibleLineRanges = emptyList() // All visible
                         }
                     }
                 )
