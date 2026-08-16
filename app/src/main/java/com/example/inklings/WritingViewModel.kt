@@ -24,15 +24,50 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     private var lastActivityMillis: Long? = null
     private val IDLE_TIMEOUT_MILLIS = 10 * 60 * 1000L
 
+    // Auto-capitalization state (Requirement 10D)
+    private var isPendingCapitalization = false
+    private var expectedCapCursorOffset = -1
+
     private val _uiEvent = MutableSharedFlow<UiEvent>()
     val uiEvent = _uiEvent.asSharedFlow()
 
     fun updateText(newValue: TextFieldValue) {
-        val processedValue = handleDoubleSpace(newValue, textFieldValue)
-        if (processedValue.text != textFieldValue.text) {
+        // Reset state if user deletes text or moves cursor manually
+        if (newValue.text.length < textFieldValue.text.length || 
+            !newValue.selection.collapsed ||
+            (isPendingCapitalization && newValue.selection.start != expectedCapCursorOffset + 1)) {
+            isPendingCapitalization = false
+        }
+
+        var processedValue = newValue
+
+        // Apply auto-capitalization if pending
+        if (isPendingCapitalization && newValue.text.length == textFieldValue.text.length + 1) {
+            processedValue = handleAutoCapitalization(newValue)
+            isPendingCapitalization = false
+        }
+
+        // Apply double-space shortcut
+        val finalValue = handleDoubleSpace(processedValue, textFieldValue)
+        
+        if (finalValue.text != textFieldValue.text) {
             trackActivity()
         }
-        textFieldValue = processedValue
+        textFieldValue = finalValue
+    }
+
+    private fun handleAutoCapitalization(value: TextFieldValue): TextFieldValue {
+        val cursor = value.selection.start
+        if (cursor <= 0) return value
+        
+        val text = value.text
+        val lastChar = text[cursor - 1]
+        
+        if (lastChar.isLowerCase()) {
+            val capitalizedText = text.substring(0, cursor - 1) + lastChar.uppercaseChar() + text.substring(cursor)
+            return value.copy(text = capitalizedText)
+        }
+        return value
     }
 
     private fun handleDoubleSpace(new: TextFieldValue, old: TextFieldValue): TextFieldValue {
@@ -55,6 +90,11 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
             // or if there's already a period or another space
             if (charBeforeSpaces != null && charBeforeSpaces != '.' && charBeforeSpaces != ' ') {
                 val newText = text.substring(0, cursor - 2) + ". " + text.substring(cursor)
+                
+                // Requirement 10D: Trigger pending capitalization
+                isPendingCapitalization = true
+                expectedCapCursorOffset = cursor
+                
                 return new.copy(
                     text = newText,
                     selection = androidx.compose.ui.text.TextRange(cursor)
