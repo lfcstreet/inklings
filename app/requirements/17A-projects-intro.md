@@ -4,1536 +4,1379 @@
 
 Introduce the underlying **Project** concept into the application.
 
-This requirement establishes the Project data model and filesystem structure.
+This requirement establishes:
+
+* Project folders under `Inklings/`
+* Project discovery from the filesystem
+* Project metadata stored inside each Project folder
+* Default Project handling
+* Safe migration of the existing pre-Project folder structure
 
 Do **not** implement the Project management UI yet.
 
 Do **not** implement moving files between Projects yet.
 
-Do **not** implement Project renaming or deletion.
+Do **not** implement Project renaming.
+
+Do **not** implement an in-app Project delete function.
 
 Those will be handled by later requirements.
 
-The goal of 17A is to establish a clean foundation that later requirements
-can build upon.
+The fundamental design rule is:
+
+> **The filesystem is the source of truth for which Projects exist.**
+
+A Project exists because its directory exists inside `Inklings/`.
 
 ---
 
 # 1. Project Concept
 
-The application currently stores its files under:
+The application currently uses:
 
-# Requirement 17A — Project Storage and Data Model
-
-## Objective
-
-Introduce the underlying **Project** concept into the application.
-
-This requirement establishes the Project data model and filesystem structure.
-
-Do **not** implement the Project management UI yet.
-
-Do **not** implement moving files between Projects yet.
-
-Do **not** implement Project renaming or deletion.
-
-Those will be handled by later requirements.
-
-The goal of 17A is to establish a clean foundation that later requirements
-can build upon.
-
----
-
-# 1. Project Concept
-
-The application currently stores its files under:
-
-```
+```text
 Inklings/
 ```
 
-Requirement 17A introduces a new Project layer immediately below `Inklings/`.
-
-Each Project is represented by a directory.
+Requirement 17A introduces a Project layer immediately below this directory.
 
 Example:
 
-```
+```text
 Inklings/
-├── Project A/
-├── Project B/
-└── Project C/
+├── default/
+├── Writing/
+├── Work/
+└── Research/
 ```
 
-Each Project has its own copy of the application's existing folder structure.
+Each immediate valid Project directory inside `Inklings/` represents one
+Project.
+
+Each Project contains its own copy of the application's existing internal
+folder structure.
 
 ---
 
 # 2. Project Directory Structure
 
-Each Project must contain the existing folder structure used by the
-application.
+Each Project must contain:
 
-For example:
-
+```text
+<Project>/
+├── .inklings-project.json
+├── 08 Dailies/
+│   └── 01 Inbox/
+└── 99 Operations/
+    └── 99 Log/
 ```
+
+Example:
+
+```text
 Inklings/
-└── Project A/
+└── Writing/
+    ├── .inklings-project.json
     ├── 08 Dailies/
     │   └── 01 Inbox/
-    │
     └── 99 Operations/
         └── 99 Log/
 ```
 
-The existing internal folder structure must not be redesigned.
+The existing internal folder structure must remain unchanged.
 
 The Project layer is simply added above it.
 
 ---
 
-# 3. Required Project Properties
+# 3. Filesystem Is the Source of Truth
 
-Each Project must have exactly these properties for Requirement 17A:
+Do NOT maintain an authoritative Project list elsewhere in the application.
 
-1. Project Name
-2. Font Color
-3. Default Project
+On application startup:
 
-These properties must be stored persistently.
+1. Locate `Inklings/`.
+2. Inspect its immediate subdirectories.
+3. Treat valid Project directories as Projects.
+4. Load each Project's metadata from its own metadata file.
+5. Initialize missing metadata when necessary.
+6. Determine the Default Project.
+
+Conceptually:
+
+```text
+App starts
+    ↓
+Scan Inklings/
+    ↓
+Discover Project directories
+    ↓
+Read each .inklings-project.json
+    ↓
+Build current Project list
+```
+
+A stored metadata record must never cause a Project to exist if its directory
+does not exist.
 
 ---
 
-# 4. Project Name
+# 4. Project Metadata File
 
-The Project Name identifies the Project.
+Every Project should contain:
 
-It will eventually also be used as the Project directory name.
-
-For example:
-
-```
-Project Name: Writing
+```text
+.inklings-project.json
 ```
 
-corresponds to:
+The metadata file is stored inside the corresponding Project directory.
 
+Example:
+
+```text
+Inklings/
+└── Research/
+    ├── .inklings-project.json
+    ├── 08 Dailies/
+    └── 99 Operations/
 ```
+
+For Requirement 17A, the metadata should contain:
+
+* `fontColor`
+* `isDefault`
+
+The Project Name does not need to be stored because:
+
+```text
+Project directory name = Project Name
+```
+
+---
+
+# 5. Metadata Example
+
+Conceptually:
+
+```json
+{
+  "fontColor": "#4285F4",
+  "isDefault": false
+}
+```
+
+The exact JSON serialization implementation is up to Gemini.
+
+Keep the metadata format:
+
+* Small
+* Simple
+* Human-readable
+* Versionable if practical
+
+Do not put document content in this file.
+
+---
+
+# 6. Project Name
+
+The Project Name is the Project directory name.
+
+Examples:
+
+```text
 Inklings/Writing/
 ```
 
-Project names must not be empty or consist only of whitespace.
+means:
 
-Do not implement Project renaming in this requirement.
-
----
-
-# 5. Font Color
-
-Each Project has a configurable font color.
-
-Store the color as Project metadata.
-
-The actual visual color-selection UI will be implemented in Requirement 17B.
-
-For 17A:
-
-* Store the color in a suitable persistent format.
-* Provide a sensible default color for newly created Projects.
-* Make the Project model capable of returning its configured color.
-
-Do not modify the Markdown content to store the color.
-
-Do not add HTML, Markdown, YAML front matter, or other formatting to represent
-the Project color.
-
-The color is application-level presentation metadata.
-
----
-
-# 6. Default Project
-
-Each Project has a Boolean:
-
-```
-isDefault
-```
-
-There must be **at most one** Default Project.
-
-The application must enforce this rule at the data/model level.
-
-When a Project becomes the Default Project:
-
-* Its `isDefault` becomes true.
-* Every other Project must become non-default.
-
-This prevents multiple Projects from being marked as the Default Project.
-
----
-
-# 7. Default Project Requirement
-
-The application must always be able to determine the Default Project once
-the Project system has been initialized.
-
-If no Project exists when the new Project system is initialized, create an
-appropriate initial Project and make it the Default Project.
-
-This ensures that the existing New-document functionality always has a valid
-destination.
-
----
-
-# 8. New Project Creation — Data Layer
-
-17A must provide a reusable application-level operation for creating a
-Project.
-
-Conceptually:
-
-```
-createProject(name, fontColor, isDefault)
-```
-
-The exact method/class names are up to the implementation.
-
-Creating a Project must:
-
-1. Validate the Project Name.
-2. Create the Project directory under `Inklings/`.
-3. Create the required existing folder structure inside it.
-4. Store the Project metadata.
-5. Enforce the single-default rule.
-
-Do not create a Markdown document when creating a Project.
-
----
-
-# 9. Project Configuration Persistence
-
-Project configuration must survive application restarts.
-
-At minimum, persist:
-
-```
-Project Name
-Font Color
-Default Project
-```
-
-Do not rely solely on in-memory variables.
-
-The exact persistence mechanism is up to the existing Android architecture.
-
-Use the application's existing persistence approach where appropriate.
-
----
-
-# 10. Project Metadata Must Be Separate From Markdown
-
-Do not store Project metadata inside individual Markdown files.
-
-For example, do NOT add:
-
-```markdown
-project: Writing
-font-color: ...
-default-project: true
-```
-
-to the Markdown document.
-
-Project information belongs to the application's Project configuration.
-
----
-
-# 11. Project Identity
-
-The implementation should maintain a stable internal identity for a Project
-rather than relying only on its display name.
-
-For example, the Project model may contain:
-
-```
-projectId
-projectName
-fontColor
-isDefault
-```
-
-The exact implementation is up to Gemini.
-
-The important point is that Project identity should not depend entirely on
-the current UI display name.
-
-This will make later Project functionality safer.
-
----
-
-# 12. Project Directory Name
-
-For Requirement 17A, the Project Name will initially correspond to the
-directory name.
-
-For example:
-
-```
-Project Name = Research
-```
-
-creates:
-
-```
-Inklings/Research/
-```
-
-Validate the name before creating the directory.
-
-At minimum, reject:
-
-* Empty names.
-* Whitespace-only names.
-* Names containing characters that cannot safely be used as Android
-  directory names.
-
-Do not implement rename functionality.
-
----
-
-# 13. Duplicate Project Names
-
-Do not allow two Projects to have the same directory name.
-
-If creation would result in a directory collision:
-
-* Do not overwrite the existing Project.
-* Do not merge the Projects.
-* Fail the creation operation safely.
-
-The UI for displaying this error will be handled in 17B.
-
----
-
-# 14. Project Folder Initialization
-
-When a Project is created, ensure the required directories exist.
-
-At minimum:
-
-```
-<Project>/
-    08 Dailies/
-        01 Inbox/
-
-    99 Operations/
-        99 Log/
-```
-
-If the existing application currently has additional required directories
-inside these structures, preserve and initialize those as well.
-
-Do not remove or rename any existing directories.
-
----
-
-# 15. Existing Files — Migration
-
-Requirement 17A must account for documents created by the application before
-the Project system existed.
-
-Existing content must not become inaccessible.
-
-Before changing the existing filesystem structure, inspect how the current
-application stores its files.
-
-The migration must preserve:
-
-* Markdown files.
-* Log files.
-* Existing filenames.
-* Existing file contents.
-* Existing folder structure.
-
-A safe initial migration strategy is to associate the existing structure with
-an initial Project.
-
-For example:
-
-```
-Inklings/
-    Existing/
-        08 Dailies/
-        99 Operations/
-```
-
-However, **do not blindly move files** if doing so could break existing paths
-or application state.
-
-Implement the safest migration compatible with the existing application's
-current storage design.
-
----
-
-# 16. Migration Must Be One-Time and Safe
-
-Migration must not repeatedly move or duplicate files every time the
-application starts.
-
-The application should be able to determine whether Project initialization
-has already occurred.
-
-If migration has already completed:
-
-* Do not repeat it.
-* Do not duplicate files.
-* Do not create duplicate Projects.
-
----
-
-# 17. Existing Project Initialization
-
-If the application has never used Projects before:
-
-1. Initialize the Project system.
-2. Create/identify the initial Project.
-3. Ensure it is the Default Project.
-4. Ensure its folder structure exists.
-5. Preserve access to existing documents and logs.
-
-Do not require the user to manually configure the application before existing
-documents can be accessed.
-
----
-
-# 18. New Documents — Preparation for 17B
-
-17A should expose a reliable way for the rest of the application to obtain
-the Default Project.
-
-For example:
-
-```
-getDefaultProject()
-```
-
-The actual method name is up to the implementation.
-
-Requirement 17B will use this when implementing the Project UI and New-file
-behavior.
-
-Do not redesign the New UI in 17A.
-
----
-
-# 19. Existing Document Project Association
-
-The Project model must support associating an existing document with its
-Project based on its filesystem location.
-
-For example:
-
-```
-Inklings/Research/08 Dailies/01 Inbox/note.md
-```
-
-belongs to:
-
-```
-Research
-```
-
-Do not assume that every currently open document belongs to the Default
-Project.
-
-The current document's Project will be important for later requirements.
-
----
-
-# 20. No File-Moving Functionality Yet
-
-Do NOT implement document movement between Projects in 17A.
-
-Do NOT move:
-
-* Markdown files between Projects.
-* Log files between Projects.
-
-That functionality will be implemented separately in Requirement 17C.
-
-17A only establishes the Project structure required for that later feature.
-
----
-
-# 21. No Project Rename
-
-Do NOT implement:
-
-* Rename Project.
-* Rename Project directory.
-* Merge Projects.
-
-These are explicitly outside the scope of 17A.
-
----
-
-# 22. No Project Delete
-
-Do NOT implement Project deletion.
-
-Project deletion is outside the scope of 17A and the planned Project
-requirements.
-
----
-
-# 23. No Project UI Yet
-
-Do not redesign the existing writing interface in this requirement.
-
-Do not add:
-
-* Project selector.
-* Project list.
-* Project management button.
-* Project dialog.
-* Color picker UI.
-
-These belong to Requirement 17B.
-
-The underlying model and persistence should nevertheless be ready for those
-features.
-
----
-
-# 24. No Changes to Existing Editor Behavior
-
-Do not change:
-
-* Fade behavior.
-* Font size.
-* Letter spacing.
-* Word spacing.
-* Line spacing.
-* Margins.
-* Cursor behavior.
-* Auto-capitalization.
-* Typewriter sounds.
-* Settings.
-* Timer.
-* Keyboard shortcuts.
-* Save behavior except where necessary to safely establish the Project
-  destination.
-
----
-
-# 25. Requirement 16 Compatibility
-
-The Project implementation must preserve Requirement 16.
-
-For a fresh document that contains only whitespace:
-
-* Do not create a Markdown file.
-* Do not create a log file.
-
-For a previously saved document:
-
-* Empty content may still be intentionally saved.
-
-Project initialization must not break this behavior.
-
----
-
-# 26. Log Folder
-
-Every Project must contain:
-
-```
-99 Operations/99 Log/
-```
-
-This is where the existing writing-session log files will eventually be
-stored.
-
-Do not change the log filename format in 17A.
-
-Do not change the timestamp relationship between Markdown files and logs.
-
----
-
-# 27. Timestamp Compatibility
-
-Requirement 17A must not alter the existing timestamp-based filenames.
-
-For example:
-
-```
-DA-2026-08-22-SAT-10_15_30.md
+```text
+Project Name = Writing
 ```
 
 and:
 
-```
-BAS-2026-08-22-SAT-10_15_30.md
-```
-
-must continue to use the same timestamp convention.
-
-The later document-moving requirement will depend on this association.
-
----
-
-# 28. Architecture
-
-Implement the Project functionality in a clean, reusable way.
-
-The Project model/storage logic should not be tightly coupled to:
-
-* The editor UI.
-* The Project management UI.
-* The color-picker UI.
-* The timer.
-* The typewriter sound system.
-
-Keep Project data and filesystem operations in an appropriate application
-layer.
-
-The exact architecture and class names are up to Gemini, provided they fit
-the existing application.
-
----
-
-# 29. Error Handling
-
-Project creation and initialization must fail safely.
-
-Do not:
-
-* Delete existing files.
-* Overwrite an existing Project.
-* Silently lose documents.
-* Silently lose logs.
-* Leave the application believing a Project exists when its directory was
-  not successfully created.
-
-Handle filesystem errors appropriately.
-
----
-
-# 30. Testing
-
-## Test 1 — First Initialization
-
-Start the application with no Project configuration.
-
-Expected:
-
-* Project system initializes.
-* An initial Project exists.
-* A Default Project exists.
-* Required folders exist.
-
----
-
-## Test 2 — Project Creation Through Data Layer
-
-Create a Project programmatically/application-internally with:
-
-```
-Name = Research
-Font Color = a valid color
-Default = false
+```text
+Inklings/default/
 ```
 
-Expected:
+means:
 
-```
-Inklings/Research/
-```
-
-exists with:
-
-```
-08 Dailies/01 Inbox/
-99 Operations/99 Log/
+```text
+Project Name = default
 ```
 
----
+Do not maintain a separate Project Name value that can disagree with the
+directory name.
 
-## Test 3 — Default Project
-
-Create Project A as Default.
-
-Create Project B as non-default.
-
-Expected:
-
-* A is Default.
-* B is not Default.
+Do not implement Project rename functionality in 17A.
 
 ---
 
-## Test 4 — Change Default
+# 7. Initial Project
 
-Make B the Default.
+The initial Project must be named exactly:
 
-Expected:
-
-* B is Default.
-* A is no longer Default.
-* There is never more than one Default Project.
-
----
-
-## Test 5 — Persistence
-
-Create Projects.
-
-Close and reopen the application.
-
-Expected:
-
-* Projects remain available.
-* Names remain unchanged.
-* Font colors remain unchanged.
-* Default Project remains unchanged.
-
----
-
-## Test 6 — Duplicate Project
-
-Attempt to create a second Project with the same directory name.
-
-Expected:
-
-* Creation fails safely.
-* Existing Project remains untouched.
-
----
-
-## Test 7 — Invalid Project Name
-
-Attempt to create a Project with:
-
-```
-""
+```text
+default
 ```
 
-or whitespace-only content.
+Lowercase.
 
-Expected:
+The initial Project path must therefore be:
 
-* Creation fails.
-* No invalid directory is created.
-
----
-
-## Test 8 — Existing Files
-
-Run the application against an installation containing existing Markdown
-and log files.
-
-Expected:
-
-* Existing files remain accessible.
-* Existing filenames remain unchanged.
-* Existing contents remain unchanged.
-* Existing logs remain accessible.
-
----
-
-## Test 9 — Restart After Migration
-
-Restart the application after Project initialization/migration.
-
-Expected:
-
-* Migration does not run again.
-* No duplicate Project is created.
-* No files are duplicated.
-
----
-
-## Test 10 — Requirement 16 Regression
-
-Verify:
-
-* Fresh empty document is not saved.
-* Previously saved document can still be intentionally cleared.
-
----
-
-# Completion Criteria
-
-Requirement 17A is complete when:
-
-1. The application has a persistent Project model.
-2. Projects exist as directories under `Inklings/`.
-3. Each Project has the existing internal folder structure.
-4. Project Name is persisted.
-5. Project Font Color is persisted.
-6. Default Project status is persisted.
-7. At most one Project can be Default.
-8. A usable Default Project always exists after initialization.
-9. Project creation works at the data/storage layer.
-10. Duplicate Project directories are prevented.
-11. Invalid Project names are rejected safely.
-12. Existing pre-Project files remain accessible.
-13. Migration, if required, is safe and does not repeat.
-14. The application can determine the Project associated with a document from
-    its path.
-15. The application can retrieve the Default Project.
-16. No Project UI is implemented yet.
-17. No Project rename functionality is implemented.
-18. No Project deletion functionality is implemented.
-19. No document-moving functionality is implemented.
-20. Requirement 16 behavior remains intact.
-21. Existing editor functionality remains intact.
-22. No unrelated behavior is changed.
-
----
-
-# Required Source-Code Comments
-
-Add concise comments explaining:
-
-1. Why Projects are a storage layer above the existing folder structure.
-2. Why Project metadata is persisted separately from Markdown files.
-3. How the single Default Project rule is enforced.
-4. How the application identifies the Default Project.
-5. How a document's Project is determined from its filesystem location.
-6. Why migration must be safe and one-time.
-7. Why document/log movement is deliberately not implemented in 17A.
-8. Why Project Font Color is presentation metadata and is not written into
-   Markdown.
-
----
-
-# After Implementation
-
-Provide a short summary explaining:
-
-1. Where the Project model was implemented.
-2. How Project metadata is persisted.
-3. How Project directories are created.
-4. How the internal folder structure is initialized.
-5. How the Default Project is enforced.
-6. How existing files are handled/migrated.
-7. How the application determines a document's Project.
-8. How the Default Project can be retrieved by later functionality.
-9. Confirmation that no Project UI was added yet.
-10. Confirmation that no file-moving, rename, or delete functionality was
-    added.
-11. Confirmation that existing functionality was not otherwise changed.
-
-Stop after implementing this requirement.
-
-Requirement 17A introduces a new Project layer immediately below `inkings/`.
-
-Each Project is represented by a directory.
-
-Example:
-
-```
-inkings/
-├── Project A/
-├── Project B/
-└── Project C/
+```text
+Inklings/default/
 ```
 
-Each Project has its own copy of the application's existing folder structure.
+with:
+
+```text
+Inklings/default/
+├── .inklings-project.json
+├── 08 Dailies/
+│   └── 01 Inbox/
+└── 99 Operations/
+    └── 99 Log/
+```
+
+The `default` Project must initially be the Default Project.
 
 ---
 
-# 2. Project Directory Structure
+# 8. Project Properties
 
-Each Project must contain the existing folder structure used by the
-application.
-
-For example:
-
-```
-inkings/
-└── Project A/
-    ├── 08 Dailies/
-    │   └── 01 Inbox/
-    │
-    └── 99 Operations/
-        └── 99 Log/
-```
-
-The existing internal folder structure must not be redesigned.
-
-The Project layer is simply added above it.
-
----
-
-# 3. Required Project Properties
-
-Each Project must have exactly these properties for Requirement 17A:
+Each Project has these properties:
 
 1. Project Name
 2. Font Color
 3. Default Project
 
-These properties must be stored persistently.
+Project Name comes from the filesystem.
+
+Font Color and Default status come from:
+
+```text
+.inklings-project.json
+```
 
 ---
 
-# 4. Project Name
+# 9. Font Color
 
-The Project Name identifies the Project.
+Each Project has a Font Color.
 
-It will eventually also be used as the Project directory name.
+For Requirement 17A:
 
-For example:
+* Store the Font Color in `.inklings-project.json`.
+* Provide a sensible default color.
+* Make the Project model able to return the configured color.
+* If metadata is missing, initialize a default Font Color.
 
-```
-Project Name: Writing
-```
+The color-picker UI will be implemented later in Requirement 17B.
 
-corresponds to:
-
-```
-inkings/Writing/
-```
-
-Project names must not be empty or consist only of whitespace.
-
-Do not implement Project renaming in this requirement.
-
----
-
-# 5. Font Color
-
-Each Project has a configurable font color.
-
-Store the color as Project metadata.
-
-The actual visual color-selection UI will be implemented in Requirement 17B.
-
-For 17A:
-
-* Store the color in a suitable persistent format.
-* Provide a sensible default color for newly created Projects.
-* Make the Project model capable of returning its configured color.
-
-Do not modify the Markdown content to store the color.
-
-Do not add HTML, Markdown, YAML front matter, or other formatting to represent
-the Project color.
-
-The color is application-level presentation metadata.
-
----
-
-# 6. Default Project
-
-Each Project has a Boolean:
-
-```
-isDefault
-```
-
-There must be **at most one** Default Project.
-
-The application must enforce this rule at the data/model level.
-
-When a Project becomes the Default Project:
-
-* Its `isDefault` becomes true.
-* Every other Project must become non-default.
-
-This prevents multiple Projects from being marked as the Default Project.
-
----
-
-# 7. Default Project Requirement
-
-The application must always be able to determine the Default Project once
-the Project system has been initialized.
-
-If no Project exists when the new Project system is initialized, create an
-appropriate initial Project and make it the Default Project.
-
-This ensures that the existing New-document functionality always has a valid
-destination.
-
----
-
-# 8. New Project Creation — Data Layer
-
-17A must provide a reusable application-level operation for creating a
-Project.
-
-Conceptually:
-
-```
-createProject(name, fontColor, isDefault)
-```
-
-The exact method/class names are up to the implementation.
-
-Creating a Project must:
-
-1. Validate the Project Name.
-2. Create the Project directory under `inkings/`.
-3. Create the required existing folder structure inside it.
-4. Store the Project metadata.
-5. Enforce the single-default rule.
-
-Do not create a Markdown document when creating a Project.
-
----
-
-# 9. Project Configuration Persistence
-
-Project configuration must survive application restarts.
-
-At minimum, persist:
-
-```
-Project Name
-Font Color
-Default Project
-```
-
-Do not rely solely on in-memory variables.
-
-The exact persistence mechanism is up to the existing Android architecture.
-
-Use the application's existing persistence approach where appropriate.
-
----
-
-# 10. Project Metadata Must Be Separate From Markdown
-
-Do not store Project metadata inside individual Markdown files.
-
-For example, do NOT add:
-
-```markdown
-project: Writing
-font-color: ...
-default-project: true
-```
-
-to the Markdown document.
-
-Project information belongs to the application's Project configuration.
-
----
-
-# 11. Project Identity
-
-The implementation should maintain a stable internal identity for a Project
-rather than relying only on its display name.
-
-For example, the Project model may contain:
-
-```
-projectId
-projectName
-fontColor
-isDefault
-```
-
-The exact implementation is up to Gemini.
-
-The important point is that Project identity should not depend entirely on
-the current UI display name.
-
-This will make later Project functionality safer.
-
----
-
-# 12. Project Directory Name
-
-For Requirement 17A, the Project Name will initially correspond to the
-directory name.
-
-For example:
-
-```
-Project Name = Research
-```
-
-creates:
-
-```
-inkings/Research/
-```
-
-Validate the name before creating the directory.
-
-At minimum, reject:
-
-* Empty names.
-* Whitespace-only names.
-* Names containing characters that cannot safely be used as Android
-  directory names.
-
-Do not implement rename functionality.
-
----
-
-# 13. Duplicate Project Names
-
-Do not allow two Projects to have the same directory name.
-
-If creation would result in a directory collision:
-
-* Do not overwrite the existing Project.
-* Do not merge the Projects.
-* Fail the creation operation safely.
-
-The UI for displaying this error will be handled in 17B.
-
----
-
-# 14. Project Folder Initialization
-
-When a Project is created, ensure the required directories exist.
-
-At minimum:
-
-```
-<Project>/
-    08 Dailies/
-        01 Inbox/
-
-    99 Operations/
-        99 Log/
-```
-
-If the existing application currently has additional required directories
-inside these structures, preserve and initialize those as well.
-
-Do not remove or rename any existing directories.
-
----
-
-# 15. Existing Files — Migration
-
-Requirement 17A must account for documents created by the application before
-the Project system existed.
-
-Existing content must not become inaccessible.
-
-Before changing the existing filesystem structure, inspect how the current
-application stores its files.
-
-The migration must preserve:
-
-* Markdown files.
-* Log files.
-* Existing filenames.
-* Existing file contents.
-* Existing folder structure.
-
-A safe initial migration strategy is to associate the existing structure with
-an initial Project.
-
-For example:
-
-```
-inkings/
-    Existing/
-        08 Dailies/
-        99 Operations/
-```
-
-However, **do not blindly move files** if doing so could break existing paths
-or application state.
-
-Implement the safest migration compatible with the existing application's
-current storage design.
-
----
-
-# 16. Migration Must Be One-Time and Safe
-
-Migration must not repeatedly move or duplicate files every time the
-application starts.
-
-The application should be able to determine whether Project initialization
-has already occurred.
-
-If migration has already completed:
-
-* Do not repeat it.
-* Do not duplicate files.
-* Do not create duplicate Projects.
-
----
-
-# 17. Existing Project Initialization
-
-If the application has never used Projects before:
-
-1. Initialize the Project system.
-2. Create/identify the initial Project.
-3. Ensure it is the Default Project.
-4. Ensure its folder structure exists.
-5. Preserve access to existing documents and logs.
-
-Do not require the user to manually configure the application before existing
-documents can be accessed.
-
----
-
-# 18. New Documents — Preparation for 17B
-
-17A should expose a reliable way for the rest of the application to obtain
-the Default Project.
-
-For example:
-
-```
-getDefaultProject()
-```
-
-The actual method name is up to the implementation.
-
-Requirement 17B will use this when implementing the Project UI and New-file
-behavior.
-
-Do not redesign the New UI in 17A.
-
----
-
-# 19. Existing Document Project Association
-
-The Project model must support associating an existing document with its
-Project based on its filesystem location.
-
-For example:
-
-```
-inkings/Research/08 Dailies/01 Inbox/note.md
-```
-
-belongs to:
-
-```
-Research
-```
-
-Do not assume that every currently open document belongs to the Default
-Project.
-
-The current document's Project will be important for later requirements.
-
----
-
-# 20. No File-Moving Functionality Yet
-
-Do NOT implement document movement between Projects in 17A.
-
-Do NOT move:
-
-* Markdown files between Projects.
-* Log files between Projects.
-
-That functionality will be implemented separately in Requirement 17C.
-
-17A only establishes the Project structure required for that later feature.
-
----
-
-# 21. No Project Rename
-
-Do NOT implement:
-
-* Rename Project.
-* Rename Project directory.
-* Merge Projects.
-
-These are explicitly outside the scope of 17A.
-
----
-
-# 22. No Project Delete
-
-Do NOT implement Project deletion.
-
-Project deletion is outside the scope of 17A and the planned Project
-requirements.
-
----
-
-# 23. No Project UI Yet
-
-Do not redesign the existing writing interface in this requirement.
+Do not modify Markdown content to represent Font Color.
 
 Do not add:
 
-* Project selector.
-* Project list.
-* Project management button.
-* Project dialog.
-* Color picker UI.
+* HTML
+* YAML
+* Markdown formatting
 
-These belong to Requirement 17B.
+for Project colors.
 
-The underlying model and persistence should nevertheless be ready for those
-features.
+Project Font Color is presentation metadata only.
 
 ---
 
-# 24. No Changes to Existing Editor Behavior
+# 10. Default Project
 
-Do not change:
+Exactly one discovered Project should ultimately be the Default Project.
 
-* Fade behavior.
-* Font size.
-* Letter spacing.
-* Word spacing.
-* Line spacing.
-* Margins.
-* Cursor behavior.
-* Auto-capitalization.
-* Typewriter sounds.
-* Settings.
-* Timer.
-* Keyboard shortcuts.
-* Save behavior except where necessary to safely establish the Project
-  destination.
+Its metadata contains:
 
----
-
-# 25. Requirement 16 Compatibility
-
-The Project implementation must preserve Requirement 16.
-
-For a fresh document that contains only whitespace:
-
-* Do not create a Markdown file.
-* Do not create a log file.
-
-For a previously saved document:
-
-* Empty content may still be intentionally saved.
-
-Project initialization must not break this behavior.
-
----
-
-# 26. Log Folder
-
-Every Project must contain:
-
-```
-99 Operations/99 Log/
+```json
+"isDefault": true
 ```
 
-This is where the existing writing-session log files will eventually be
-stored.
+When another Project later becomes Default:
 
-Do not change the log filename format in 17A.
+* Set its `isDefault` to `true`.
+* Set all other discovered Projects to `false`.
 
-Do not change the timestamp relationship between Markdown files and logs.
+There must never be more than one effective Default Project.
 
 ---
 
-# 27. Timestamp Compatibility
+# 11. `default` Name vs Default Status
 
-Requirement 17A must not alter the existing timestamp-based filenames.
+The Project named:
+
+```text
+default
+```
+
+is the initial and fallback Project.
+
+However, another Project may later be selected as the Default Project.
 
 For example:
 
+```text
+Inklings/
+├── default/
+├── Writing/
+└── Research/
 ```
-DA-2026-08-22-SAT-10_15_30.md
+
+could later have:
+
+```text
+Writing → isDefault = true
+default → isDefault = false
+Research → isDefault = false
+```
+
+Therefore:
+
+> The Project named `default` does not have to remain the active Default
+> Project forever.
+
+It remains the fallback Project.
+
+---
+
+# 12. External Project Deletion
+
+The user must be able to delete a Project using Android's Files app.
+
+Example:
+
+Before:
+
+```text
+Inklings/
+├── default/
+├── Writing/
+└── Research/
+```
+
+The user deletes:
+
+```text
+Inklings/Research/
+```
+
+using Android Files.
+
+On the next application startup:
+
+```text
+Research
+```
+
+must no longer exist as a Project.
+
+The application must NOT recreate it.
+
+Because its metadata file was inside the Project folder, its Project metadata
+was deleted together with the Project.
+
+---
+
+# 13. No Separate Authoritative Project Registry
+
+Do NOT store an authoritative list such as:
+
+```text
+Projects = [default, Writing, Research]
+```
+
+inside:
+
+* SharedPreferences
+* DataStore
+* Room/database
+* Internal application files
+* Any other separate registry
+
+for the purpose of defining Project existence.
+
+The filesystem defines which Projects exist.
+
+Application preferences may still be used for unrelated settings such as:
+
+* Typewriter Sounds
+* Timer duration
+
+but not as the Project inventory.
+
+---
+
+# 14. Missing Project Metadata
+
+A Project directory may exist without:
+
+```text
+.inklings-project.json
+```
+
+This may happen if the user manually creates/copies a Project directory.
+
+For example:
+
+```text
+Inklings/
+└── Imported/
+    ├── 08 Dailies/
+    └── 99 Operations/
+```
+
+On startup, the application should discover:
+
+```text
+Imported
+```
+
+as a Project.
+
+Initialize safe metadata:
+
+```text
+Project Name = Imported
+Font Color = default font color
+Default Project = false
+```
+
+and create:
+
+```text
+Inklings/Imported/.inklings-project.json
+```
+
+Do not reject the Project merely because metadata is missing.
+
+---
+
+# 15. External Project Addition
+
+The application should tolerate a Project directory being copied or created
+under `Inklings/` outside the app.
+
+On the next startup, it should be discovered.
+
+The filesystem remains authoritative.
+
+Do not require that every Project was originally created by the application.
+
+---
+
+# 16. Project Folder Validation
+
+A directory directly under `Inklings/` should only be treated as a Project if
+it is reasonably compatible with the Project structure.
+
+Do not treat arbitrary loose files under `Inklings/` as Projects.
+
+Be conservative.
+
+Do not delete unexpected files or directories simply because they are not
+recognized.
+
+---
+
+# 17. Deleted Current Default Project
+
+Suppose:
+
+```text
+Inklings/
+├── default/
+├── Writing/
+└── Research/
 ```
 
 and:
 
-```
-BAS-2026-08-22-SAT-10_15_30.md
+```text
+Writing/.inklings-project.json
 ```
 
-must continue to use the same timestamp convention.
+contains:
 
-The later document-moving requirement will depend on this association.
+```json
+"isDefault": true
+```
+
+The user deletes:
+
+```text
+Inklings/Writing/
+```
+
+using Android Files.
+
+On the next startup:
+
+* `Writing` must disappear.
+* `Writing` must NOT be recreated.
+* `default` becomes the Default Project.
+
+Update:
+
+```text
+Inklings/default/.inklings-project.json
+```
+
+to contain:
+
+```json
+"isDefault": true
+```
 
 ---
 
-# 28. Architecture
+# 18. Deleted `default` Project
 
-Implement the Project functionality in a clean, reusable way.
+If the user deletes:
 
-The Project model/storage logic should not be tightly coupled to:
+```text
+Inklings/default/
+```
 
-* The editor UI.
-* The Project management UI.
-* The color-picker UI.
-* The timer.
-* The typewriter sound system.
+the application should not immediately recreate it merely because of stale
+metadata.
 
-Keep Project data and filesystem operations in an appropriate application
-layer.
+However, if the application needs a fallback because no valid Default Project
+exists, recreate:
 
-The exact architecture and class names are up to Gemini, provided they fit
-the existing application.
+```text
+Inklings/default/
+```
+
+with:
+
+```text
+.inklings-project.json
+08 Dailies/01 Inbox/
+99 Operations/99 Log/
+```
+
+and make it the Default Project.
+
+Do NOT recreate any other externally deleted Project.
 
 ---
 
-# 29. Error Handling
+# 19. Multiple Defaults — Recovery
 
-Project creation and initialization must fail safely.
+It is possible that metadata becomes inconsistent.
+
+For example:
+
+```text
+Writing/.inklings-project.json  → isDefault = true
+Research/.inklings-project.json → isDefault = true
+```
+
+On startup, detect and correct this inconsistency.
+
+After reconciliation:
+
+```text
+Exactly one Project → isDefault = true
+```
+
+Persist the corrected metadata.
+
+Use a deterministic/safe rule.
+
+Prefer the existing valid Default if one can be determined.
+
+Otherwise fall back to:
+
+```text
+default
+```
+
+---
+
+# 20. No Default — Recovery
+
+If no discovered Project contains:
+
+```json
+"isDefault": true
+```
+
+then make:
+
+```text
+default
+```
+
+the Default Project.
+
+If `default` does not exist and is required as the fallback, create it.
+
+---
+
+# 21. Project Discovery on Startup
+
+On every application startup:
+
+1. Locate `Inklings/`.
+2. Detect whether migration from the pre-Project structure is needed.
+3. Perform migration if required.
+4. Scan immediate Project directories.
+5. Read each `.inklings-project.json`.
+6. Initialize missing metadata.
+7. Reconcile Default Project status.
+8. Remove the effect of stale/nonexistent Project references.
+9. Build the Project list used by the application.
+
+Do not implement continuous filesystem watching.
+
+Startup reconciliation is sufficient for 17A.
+
+---
+
+# 22. Project Creation — Data Layer Only
+
+Provide a reusable application-level operation for creating a Project.
+
+Conceptually:
+
+```text
+createProject(name, fontColor, isDefault)
+```
+
+The exact method/class names are up to Gemini.
+
+Creating a Project must:
+
+1. Validate the Project Name.
+2. Verify that the directory does not already exist.
+3. Create:
+
+```text
+Inklings/<Project Name>/
+```
+
+4. Create:
+
+```text
+.inklings-project.json
+08 Dailies/01 Inbox/
+99 Operations/99 Log/
+```
+
+5. Store the selected Font Color.
+6. Enforce the single-Default rule.
+
+Do not create a Markdown document during Project creation.
+
+No Project creation UI is required yet.
+
+---
+
+# 23. Project Name Validation
+
+Project names must:
+
+* Not be empty.
+* Not consist only of whitespace.
+* Be safe as Android directory names.
+* Not collide with an existing Project directory.
+
+Trim leading/trailing whitespace before validation.
+
+Do not silently alter a Project name into something substantially different.
+
+Fail safely if the name cannot be used.
+
+---
+
+# 24. Duplicate Project Names
+
+If:
+
+```text
+Inklings/Research/
+```
+
+already exists, attempting to create another Project named:
+
+```text
+Research
+```
+
+must fail.
 
 Do not:
 
-* Delete existing files.
-* Overwrite an existing Project.
-* Silently lose documents.
-* Silently lose logs.
-* Leave the application believing a Project exists when its directory was
-  not successfully created.
-
-Handle filesystem errors appropriately.
+* Overwrite it.
+* Merge it.
+* Delete it.
+* Add files into it accidentally.
 
 ---
 
-# 30. Testing
+# 25. Existing Folder Migration
 
-## Test 1 — First Initialization
+Before Requirement 17A, the application may currently have:
 
-Start the application with no Project configuration.
+```text
+Inklings/
+├── 08 Dailies/
+│   └── 01 Inbox/
+└── 99 Operations/
+    └── 99 Log/
+```
 
-Expected:
+Requirement 17A must migrate this existing application structure into the
+initial `default` Project.
 
-* Project system initializes.
-* An initial Project exists.
-* A Default Project exists.
-* Required folders exist.
+After migration:
+
+```text
+Inklings/
+└── default/
+    ├── .inklings-project.json
+    ├── 08 Dailies/
+    │   └── 01 Inbox/
+    └── 99 Operations/
+        └── 99 Log/
+```
+
+The existing `08 Dailies` and `99 Operations` trees move under:
+
+```text
+Inklings/default/
+```
 
 ---
 
-## Test 2 — Project Creation Through Data Layer
+# 26. Migration Safety
 
-Create a Project programmatically/application-internally with:
+Migration must preserve exactly:
 
+* Existing Markdown files
+* Existing log files
+* Existing filenames
+* Existing timestamps
+* Existing file contents
+* Existing year/month log directories
+* Existing subdirectories
+
+Do not regenerate:
+
+* DA filenames
+* BAS filenames
+* timestamps
+
+Do not modify Markdown content.
+
+Do not modify BAS content.
+
+---
+
+# 27. Migration Must Be One-Time and Idempotent
+
+Migration must be safe if startup/initialization occurs repeatedly.
+
+After:
+
+```text
+Inklings/default/
 ```
-Name = Research
-Font Color = a valid color
-Default = false
+
+has been established, future startups must not produce:
+
+```text
+Inklings/default/default/
 ```
+
+or:
+
+```text
+Inklings/default 2/
+```
+
+or duplicate the old files.
+
+Initialization logic must be idempotent.
+
+---
+
+# 28. Conservative Migration
+
+If `Inklings/` contains unexpected user-created data, do not blindly move or
+delete it.
+
+Only migrate the existing application structures that can be confidently
+identified, especially:
+
+```text
+08 Dailies/
+99 Operations/
+```
+
+Preserving user data is more important than forcing every object into the new
+structure.
+
+---
+
+# 29. Metadata Created During Migration
+
+During migration, create:
+
+```text
+Inklings/default/.inklings-project.json
+```
+
+with:
+
+```text
+Font Color = current/default application font color
+isDefault = true
+```
+
+Do not insert Project metadata into existing Markdown files.
+
+---
+
+# 30. Default Project Lookup
+
+Expose a reliable application-level way to retrieve the current Default
+Project.
+
+Conceptually:
+
+```text
+getDefaultProject()
+```
+
+This should return a Project that actually exists in the filesystem.
+
+Do not return stale/nonexistent Project metadata.
+
+Later requirements will use this to determine where new files are created.
+
+---
+
+# 31. Document Project Association
+
+The application must be able to determine a saved document's Project from its
+actual path.
+
+Example:
+
+```text
+Inklings/Research/08 Dailies/01 Inbox/
+    DA-2026-08-22-SAT-10_15_30.md
+```
+
+belongs to:
+
+```text
+Research
+```
+
+Do not infer its Project from whichever Project happens to be Default.
+
+---
+
+# 32. Timestamp Compatibility
+
+Do not alter the existing timestamp-based file conventions.
+
+Main file example:
+
+```text
+DA-2026-08-22-SAT-10_15_30.md
+```
+
+Associated BAS example:
+
+```text
+BAS-2026-08-22-SAT-10_15_30.md
+```
+
+The exact existing timestamp convention in the current implementation must be
+preserved.
+
+Requirement 17C will later rely on this timestamp association when moving a
+document and its log together.
+
+---
+
+# 33. No File Movement Between Projects Yet
+
+Do NOT implement normal document movement between Projects in 17A.
+
+Do NOT add:
+
+```text
+Move to Project
+```
+
+functionality.
+
+Do NOT move associated BAS files between existing Projects.
+
+The only movement in this requirement is the one-time migration of the
+pre-Project structure into:
+
+```text
+Inklings/default/
+```
+
+Normal Project-to-Project movement belongs to Requirement 17C.
+
+---
+
+# 34. No Project Rename
+
+Do NOT implement:
+
+* Project rename
+* Project directory rename
+* Project merge
+
+The folder name is the Project name for now.
+
+---
+
+# 35. No In-App Project Delete
+
+Do NOT add a Delete Project action to the application.
+
+The supported deletion mechanism for now is:
+
+```text
+Android Files
+    ↓
+Delete Project folder
+    ↓
+Restart application
+    ↓
+Project disappears
+```
+
+---
+
+# 36. No Project UI Yet
+
+Do not add:
+
+* Project button
+* Project selector
+* Project list
+* Project dialog
+* Project editor
+* Color picker
+
+Those belong to Requirement 17B.
+
+17A implements storage and data-model functionality only.
+
+---
+
+# 37. Requirement 16 Compatibility
+
+Requirement 16 must remain intact.
+
+### Fresh unsaved document
+
+If content is empty/whitespace only:
+
+```text
+Do not create Markdown file
+Do not create BAS file
+```
+
+### Previously saved document
+
+If the user deletes all content:
+
+```text
+Save empty content to the existing file
+```
+
+Adding Projects must not change these rules.
+
+---
+
+# 38. Existing Save Behavior
+
+Do not redesign Save/Auto-save/New/Close in this requirement except for the
+minimum Project-path integration required by the new storage structure.
+
+Existing behavior must remain intact.
+
+---
+
+# 39. Existing Log Behavior
+
+Every Project contains:
+
+```text
+99 Operations/99 Log/
+```
+
+Do not change:
+
+* BAS contents
+* Writing-time calculation
+* BAS naming
+* Year/month directory behavior
+
+Only the Project layer is new.
+
+---
+
+# 40. Existing Editor Behavior
+
+Do not change:
+
+* Courier Prime
+* Font size
+* Letter spacing
+* Word spacing
+* Line spacing
+* Margins
+* Fade behavior
+* Cursor behavior
+* Auto-capitalization
+* Double-space period behavior
+* Typewriter sounds
+* Settings
+* Timer
+* Full-screen mode
+* Keyboard shortcuts
+* Action controls
+
+Project Font Color is stored in 17A but does not require the UI/changeable
+visual behavior until 17B.
+
+---
+
+# 41. Architecture
+
+Keep Project handling separated from the editor UI.
+
+The implementation should conceptually provide reusable operations such as:
+
+```text
+discoverProjects()
+createProject(...)
+getDefaultProject()
+getProjectForDocument(...)
+ensureProjectMetadata(...)
+```
+
+These names are illustrative only.
+
+Use architecture appropriate to the existing application.
+
+The important separation is:
+
+```text
+Filesystem / Project layer
+        ↓
+Application/editor logic
+        ↓
+UI added later
+```
+
+---
+
+# 42. Error Handling
+
+Project initialization and migration must fail safely.
+
+Do not:
+
+* Delete user documents
+* Delete user logs
+* Overwrite an existing Project directory
+* Lose metadata silently
+* Claim migration succeeded if required file operations failed
+
+If migration fails partway through, preserve user data and return/report a
+clear internal error state.
+
+Do not continue destructively.
+
+---
+
+# Testing
+
+## Test 1 — Migration
+
+Before updating:
+
+```text
+Inklings/
+├── 08 Dailies/
+└── 99 Operations/
+```
+
+Run the 17A version.
 
 Expected:
 
-```
-inkings/Research/
+```text
+Inklings/
+└── default/
+    ├── .inklings-project.json
+    ├── 08 Dailies/
+    └── 99 Operations/
 ```
 
-exists with:
+Verify all previous files remain present.
 
+---
+
+## Test 2 — Metadata
+
+Inspect:
+
+```text
+Inklings/default/.inklings-project.json
 ```
+
+Verify it exists and contains at least:
+
+```text
+fontColor
+isDefault
+```
+
+Verify:
+
+```text
+isDefault = true
+```
+
+---
+
+## Test 3 — Restart Repeatedly
+
+Restart the application several times.
+
+Verify:
+
+* No repeated migration
+* No duplicate files
+* No nested `default/default/`
+* No duplicate metadata
+* No duplicate Projects
+
+---
+
+## Test 4 — Filesystem Project Discovery
+
+Create/copy a valid directory:
+
+```text
+Inklings/Research/
+```
+
+with the required Project subfolders.
+
+Restart the app.
+
+Verify the Project layer discovers:
+
+```text
+Research
+```
+
+---
+
+## Test 5 — Missing Metadata
+
+Remove or omit:
+
+```text
+Research/.inklings-project.json
+```
+
+Restart.
+
+Verify:
+
+* Research remains a valid Project.
+* Metadata is initialized.
+* Default Font Color is supplied.
+* Research does not unexpectedly become Default.
+
+---
+
+## Test 6 — External Project Deletion
+
+Have:
+
+```text
+Inklings/
+├── default/
+├── Writing/
+└── Research/
+```
+
+Delete:
+
+```text
+Research/
+```
+
+using Android Files.
+
+Restart.
+
+Verify:
+
+* Research is gone.
+* Research is not recreated.
+* No stale Project metadata makes it reappear.
+
+---
+
+## Test 7 — External Default Project Deletion
+
+Have:
+
+```text
+default
+Writing
+Research
+```
+
+with:
+
+```text
+Writing → isDefault = true
+```
+
+Delete:
+
+```text
+Writing/
+```
+
+externally.
+
+Restart.
+
+Expected:
+
+```text
+default → isDefault = true
+```
+
+Writing must not be recreated.
+
+---
+
+## Test 8 — Delete Fallback `default`
+
+Externally delete:
+
+```text
+Inklings/default/
+```
+
+while no other usable Default Project exists.
+
+Restart.
+
+Verify:
+
+```text
+Inklings/default/
+```
+
+is safely recreated with:
+
+```text
+.inklings-project.json
 08 Dailies/01 Inbox/
 99 Operations/99 Log/
 ```
 
 ---
 
-## Test 3 — Default Project
+## Test 9 — Multiple Default Metadata
 
-Create Project A as Default.
+Manually/create a test state where two Projects have:
 
-Create Project B as non-default.
-
-Expected:
-
-* A is Default.
-* B is not Default.
-
----
-
-## Test 4 — Change Default
-
-Make B the Default.
-
-Expected:
-
-* B is Default.
-* A is no longer Default.
-* There is never more than one Default Project.
-
----
-
-## Test 5 — Persistence
-
-Create Projects.
-
-Close and reopen the application.
-
-Expected:
-
-* Projects remain available.
-* Names remain unchanged.
-* Font colors remain unchanged.
-* Default Project remains unchanged.
-
----
-
-## Test 6 — Duplicate Project
-
-Attempt to create a second Project with the same directory name.
-
-Expected:
-
-* Creation fails safely.
-* Existing Project remains untouched.
-
----
-
-## Test 7 — Invalid Project Name
-
-Attempt to create a Project with:
-
-```
-""
+```json
+"isDefault": true
 ```
 
-or whitespace-only content.
+Restart.
 
-Expected:
-
-* Creation fails.
-* No invalid directory is created.
+Verify the application repairs the state so exactly one Project remains
+Default.
 
 ---
 
-## Test 8 — Existing Files
+## Test 10 — Create Project Through Data Layer
 
-Run the application against an installation containing existing Markdown
-and log files.
+Create:
 
-Expected:
+```text
+Research
+```
 
-* Existing files remain accessible.
-* Existing filenames remain unchanged.
-* Existing contents remain unchanged.
-* Existing logs remain accessible.
-
----
-
-## Test 9 — Restart After Migration
-
-Restart the application after Project initialization/migration.
-
-Expected:
-
-* Migration does not run again.
-* No duplicate Project is created.
-* No files are duplicated.
-
----
-
-## Test 10 — Requirement 16 Regression
+through the internal Project creation function.
 
 Verify:
 
-* Fresh empty document is not saved.
-* Previously saved document can still be intentionally cleared.
+```text
+Inklings/Research/
+├── .inklings-project.json
+├── 08 Dailies/
+│   └── 01 Inbox/
+└── 99 Operations/
+    └── 99 Log/
+```
+
+exists.
+
+---
+
+## Test 11 — Requirement 16 Regression
+
+Verify:
+
+* Fresh empty document → no file
+* Fresh whitespace-only document → no file
+* Previously saved document cleared → existing file becomes empty
+
+---
+
+## Test 12 — Existing Feature Regression
+
+Verify:
+
+* Save
+* Auto-save
+* New
+* Close
+* BAS logging
+* Fade
+* Timer
+* Typewriter sounds
+* Settings
+* Full-screen
+* Ctrl+S
+* Ctrl+N
+* Ctrl+Q
+
+continue to work.
 
 ---
 
@@ -1541,29 +1384,39 @@ Verify:
 
 Requirement 17A is complete when:
 
-1. The application has a persistent Project model.
-2. Projects exist as directories under `inkings/`.
-3. Each Project has the existing internal folder structure.
-4. Project Name is persisted.
-5. Project Font Color is persisted.
-6. Default Project status is persisted.
-7. At most one Project can be Default.
-8. A usable Default Project always exists after initialization.
-9. Project creation works at the data/storage layer.
-10. Duplicate Project directories are prevented.
-11. Invalid Project names are rejected safely.
-12. Existing pre-Project files remain accessible.
-13. Migration, if required, is safe and does not repeat.
-14. The application can determine the Project associated with a document from
-    its path.
-15. The application can retrieve the Default Project.
-16. No Project UI is implemented yet.
-17. No Project rename functionality is implemented.
-18. No Project deletion functionality is implemented.
-19. No document-moving functionality is implemented.
-20. Requirement 16 behavior remains intact.
-21. Existing editor functionality remains intact.
-22. No unrelated behavior is changed.
+1. The root directory is consistently `Inklings/`.
+2. Projects are represented by immediate directories below `Inklings/`.
+3. The filesystem is authoritative for Project existence.
+4. Every application-created Project contains `.inklings-project.json`.
+5. Metadata is stored inside the Project directory.
+6. Project Name is derived from the directory name.
+7. Font Color is stored in Project metadata.
+8. Default status is stored in Project metadata.
+9. The initial Project is named exactly `default`.
+10. Existing pre-Project application content is safely migrated under
+    `Inklings/default/`.
+11. Migration preserves filenames, timestamps, contents and folder structure.
+12. Migration is idempotent.
+13. Missing metadata is safely initialized.
+14. Externally added valid Project directories can be discovered.
+15. Externally deleted Projects disappear after restart.
+16. Deleted Projects are not recreated from stale metadata.
+17. A deleted configured Default Project falls back to `default`.
+18. `default` can be recreated when necessary as the required fallback.
+19. Multiple-default inconsistencies are repaired.
+20. Duplicate Project directories are prevented.
+21. Invalid Project names are rejected.
+22. Project creation exists at the data layer.
+23. The application can retrieve the actual Default Project.
+24. The application can determine a saved document's Project from its path.
+25. Existing timestamp-based DA/BAS association remains unchanged.
+26. No Project management UI is added.
+27. No Project rename functionality is added.
+28. No in-app Project deletion functionality is added.
+29. No normal Project-to-Project file movement is added.
+30. Requirement 16 remains intact.
+31. Existing editor functionality remains intact.
+32. No unrelated behavior is changed.
 
 ---
 
@@ -1571,15 +1424,20 @@ Requirement 17A is complete when:
 
 Add concise comments explaining:
 
-1. Why Projects are a storage layer above the existing folder structure.
-2. Why Project metadata is persisted separately from Markdown files.
-3. How the single Default Project rule is enforced.
-4. How the application identifies the Default Project.
-5. How a document's Project is determined from its filesystem location.
-6. Why migration must be safe and one-time.
-7. Why document/log movement is deliberately not implemented in 17A.
-8. Why Project Font Color is presentation metadata and is not written into
-   Markdown.
+1. Why the filesystem is the source of truth for Project existence.
+2. Why `.inklings-project.json` lives inside the Project directory.
+3. Why deleting a Project folder externally also naturally removes its
+   metadata.
+4. Why there is no authoritative external Project registry.
+5. Why Project Name comes from the directory name.
+6. Why `default` is the initial and fallback Project.
+7. How the single-Default rule is reconciled.
+8. How missing metadata is initialized.
+9. Why externally deleted Projects must not be recreated.
+10. Why migration into `default` must be idempotent.
+11. How a document's Project is determined from its actual path.
+12. Why normal file movement, Project UI, rename and in-app deletion are
+    deliberately deferred.
 
 ---
 
@@ -1587,17 +1445,21 @@ Add concise comments explaining:
 
 Provide a short summary explaining:
 
-1. Where the Project model was implemented.
-2. How Project metadata is persisted.
-3. How Project directories are created.
-4. How the internal folder structure is initialized.
-5. How the Default Project is enforced.
-6. How existing files are handled/migrated.
-7. How the application determines a document's Project.
-8. How the Default Project can be retrieved by later functionality.
-9. Confirmation that no Project UI was added yet.
-10. Confirmation that no file-moving, rename, or delete functionality was
-    added.
-11. Confirmation that existing functionality was not otherwise changed.
+1. Which files were changed.
+2. How Projects are discovered.
+3. How `Inklings/` is scanned.
+4. How `.inklings-project.json` is structured.
+5. How metadata is read/written.
+6. How the `default` Project is created.
+7. How existing files are migrated into `default`.
+8. How migration is kept idempotent.
+9. How externally added Projects are handled.
+10. How missing metadata is handled.
+11. How externally deleted Projects are handled.
+12. What happens when the active Default Project has been deleted.
+13. How the application determines a document's Project.
+14. Confirmation that no Project UI, rename, in-app deletion, or normal
+    Project-to-Project movement was added.
+15. Confirmation that existing application behavior remains unchanged.
 
-Stop after implementing this requirement.
+Stop after implementing Requirement 17A.

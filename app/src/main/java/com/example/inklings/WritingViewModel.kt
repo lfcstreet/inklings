@@ -26,7 +26,8 @@ enum class TimerState { STOPPED, RUNNING, PAUSED, COMPLETED }
 
 class WritingViewModel(application: Application) : AndroidViewModel(application) {
 
-    private var sessionManager = SessionManager(application)
+    private val projectManager = ProjectManager(application).apply { initialize() }
+    private var sessionManager = SessionManager(application, projectManager.getDefaultProject())
     private val soundManager = TypewriterSoundManager(application)
     private val settingsManager = SettingsManager(application)
     private var lastSavedText = ""
@@ -35,6 +36,9 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         private set
 
     var isSoundEnabled by mutableStateOf(settingsManager.isTypewriterSoundEnabled)
+        private set
+
+    var currentProject by mutableStateOf(projectManager.getDefaultProject())
         private set
 
     // Timer state (Requirement 15)
@@ -313,7 +317,9 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun resetToNewSession(silent: Boolean) {
-        sessionManager = SessionManager(getApplication())
+        val defaultProject = projectManager.getDefaultProject()
+        currentProject = defaultProject
+        sessionManager = SessionManager(getApplication(), defaultProject)
         textFieldValue = TextFieldValue("")
         lastSavedText = ""
         totalAccumulatedMillis = 0L
@@ -324,7 +330,7 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         resetTimer()
         if (!silent) {
             viewModelScope.launch {
-                _uiEvent.emit(UiEvent.ShowToast("New session started"))
+                _uiEvent.emit(UiEvent.ShowToast("New session started in ${defaultProject.name}"))
             }
         }
     }

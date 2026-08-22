@@ -11,9 +11,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class SessionManager(private val context: Context) {
+/**
+ * Requirement 17A: Session and File persistence relative to a Project.
+ * The internal folder structure (08 Dailies, 99 Operations) is preserved inside each project folder.
+ */
+class SessionManager(private val context: Context, val project: Project) {
 
-    private val relativePath = "Documents/Inklings/08 Dailies/01 Inbox"
+    private val projectRootPath = "Documents/Inklings/${project.name}"
+    private val relativePath = "$projectRootPath/08 Dailies/01 Inbox"
     
     val sessionFileName: String = generateSessionFileName()
     private var sessionUri: Uri? = null
@@ -23,6 +28,9 @@ class SessionManager(private val context: Context) {
     var isDocumentSaved = false
         private set
 
+    /**
+     * Requirement 32: Timestamp convention remains unchanged to maintain DA/BAS association.
+     */
     private fun generateSessionFileName(): String {
         val now = Date()
         val dateFormat = SimpleDateFormat("yyyy-MM-dd-EEE-HH_mm_ss", Locale.US)
@@ -32,9 +40,7 @@ class SessionManager(private val context: Context) {
 
     fun saveDocument(content: String): Result<Unit> {
         return try {
-            // Requirement 16: If a document has already been saved, we update the existing file 
-            // even if the content is empty. This allows intentional clearing of a file's content
-            // without deleting the file or creating a new timestamped version.
+            // Requirement 16 & 17A: Save document within its project directory.
             val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 saveWithMediaStore(content, relativePath, sessionFileName, isDocument = true)
             } else {
@@ -49,6 +55,9 @@ class SessionManager(private val context: Context) {
         }
     }
 
+    /**
+     * Requirement 39: Existing log behavior remains intact, now stored under the Project path.
+     */
     fun saveTimeLog(minutes: Int): Result<Unit> {
         return try {
             val now = Date()
@@ -60,7 +69,7 @@ class SessionManager(private val context: Context) {
             val month = monthFormat.format(now)
             val fileTimestamp = fileTimestampFormat.format(now)
             
-            val logRelativePath = "Documents/Inklings/99 Operations/99 Log/$year/$month"
+            val logRelativePath = "$projectRootPath/99 Operations/99 Log/$year/$month"
             val logFileName = "BAS-$fileTimestamp.md"
             val content = "dailying:: $minutes"
 
