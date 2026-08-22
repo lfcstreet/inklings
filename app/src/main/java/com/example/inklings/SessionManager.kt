@@ -18,6 +18,11 @@ class SessionManager(private val context: Context) {
     val sessionFileName: String = generateSessionFileName()
     private var sessionUri: Uri? = null
 
+    // Requirement 16: Track whether the main document has been successfully saved at least once.
+    // This allows the app to distinguish between a "fresh" document and a "previously saved" one.
+    var isDocumentSaved = false
+        private set
+
     private fun generateSessionFileName(): String {
         val now = Date()
         val dateFormat = SimpleDateFormat("yyyy-MM-dd-EEE-HH_mm_ss", Locale.US)
@@ -27,11 +32,18 @@ class SessionManager(private val context: Context) {
 
     fun saveDocument(content: String): Result<Unit> {
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Requirement 16: If a document has already been saved, we update the existing file 
+            // even if the content is empty. This allows intentional clearing of a file's content
+            // without deleting the file or creating a new timestamped version.
+            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 saveWithMediaStore(content, relativePath, sessionFileName, isDocument = true)
             } else {
                 saveWithLegacyStorage(content, relativePath, sessionFileName)
             }
+            if (result.isSuccess) {
+                isDocumentSaved = true
+            }
+            result
         } catch (e: Exception) {
             Result.failure(e)
         }

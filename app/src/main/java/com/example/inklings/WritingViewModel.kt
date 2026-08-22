@@ -73,11 +73,20 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
             while (isActive) {
                 delay(60 * 1000L)
                 val currentText = textFieldValue.text
-                if (currentText.isNotEmpty() && currentText != lastSavedText) {
+                // Requirement 16: Shared save-decision logic for auto-save
+                if (shouldSave(currentText) && currentText != lastSavedText) {
                     save(silent = true)
                 }
             }
         }
+    }
+
+    private fun shouldSave(content: String): Boolean {
+        // Requirement 16: 
+        // 1. Fresh document (not saved) + empty/whitespace -> skip save to avoid creating unwanted files.
+        // 2. Previously saved document -> always save to allow intentional clearing/emptying of the file.
+        // Empty-content status is NOT used as the saved-state indicator.
+        return sessionManager.isDocumentSaved || content.isNotBlank()
     }
 
     fun updateText(newValue: TextFieldValue) {
@@ -243,6 +252,13 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     fun save(silent: Boolean = false, onSuccess: (() -> Unit)? = null) {
         viewModelScope.launch {
             val content = textFieldValue.text
+            
+            // Requirement 16: Prevent saving fresh whitespace-only documents.
+            if (!shouldSave(content)) {
+                onSuccess?.invoke()
+                return@launch
+            }
+
             val result = sessionManager.saveDocument(content)
             if (result.isSuccess) {
                 lastSavedText = content
@@ -257,6 +273,12 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private suspend fun finalizeAndSaveTimeLog(endTime: Long): Boolean {
+        // Requirement 16: Fresh documents that are never saved because they are empty 
+        // must not create log files (BAS- files).
+        if (!sessionManager.isDocumentSaved) {
+            return true
+        }
+
         val minutes = calculateTotalMinutes(endTime)
         if (minutes >= 1) {
             val result = sessionManager.saveTimeLog(minutes)
@@ -271,24 +293,18 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     fun newSession(silent: Boolean = false) {
         viewModelScope.launch {
             val endTime = System.currentTimeMillis()
-            val docResult = sessionManager.saveDocument(textFieldValue.text)
+            val content = textFieldValue.text
+
+            // Requirement 16: Implement same-decision logic for New session transition.
+            if (!shouldSave(content)) {
+                resetToNewSession(silent)
+                return@launch
+            }
+
+            val docResult = sessionManager.saveDocument(content)
             if (docResult.isSuccess) {
                 if (finalizeAndSaveTimeLog(endTime)) {
-                    sessionManager = SessionManager(getApplication())
-                    textFieldValue = TextFieldValue("")
-                    lastSavedText = ""
-                    totalAccumulatedMillis = 0L
-                    currentPeriodStartMillis = null
-                    lastActivityMillis = null
-                    isPendingPhysicalCapitalization = true
-                    expectedPhysicalCapOffset = 0
-                    
-                    // Requirement 15: Reset timer for new session
-                    resetTimer()
-                    
-                    if (!silent) {
-                        _uiEvent.emit(UiEvent.ShowToast("New session started"))
-                    }
+                    resetToNewSession(silent)
                 }
             } else {
                 _uiEvent.emit(UiEvent.ShowError("Save Error: ${docResult.exceptionOrNull()?.message ?: "Unknown error"}"))
@@ -296,10 +312,35 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun resetToNewSession(silent: Boolean) {
+        sessionManager = SessionManager(getApplication())
+        textFieldValue = TextFieldValue("")
+        lastSavedText = ""
+        totalAccumulatedMillis = 0L
+        currentPeriodStartMillis = null
+        lastActivityMillis = null
+        isPendingPhysicalCapitalization = true
+        expectedPhysicalCapOffset = 0
+        resetTimer()
+        if (!silent) {
+            viewModelScope.launch {
+                _uiEvent.emit(UiEvent.ShowToast("New session started"))
+            }
+        }
+    }
+
     fun closeSession(silent: Boolean = false) {
         viewModelScope.launch {
             val endTime = System.currentTimeMillis()
-            val docResult = sessionManager.saveDocument(textFieldValue.text)
+            val content = textFieldValue.text
+
+            // Requirement 16: Implement same-decision logic for Close action.
+            if (!shouldSave(content)) {
+                _uiEvent.emit(UiEvent.CloseApp)
+                return@launch
+            }
+
+            val docResult = sessionManager.saveDocument(content)
             if (docResult.isSuccess) {
                 if (finalizeAndSaveTimeLog(endTime)) {
                     _uiEvent.emit(UiEvent.CloseApp)
