@@ -1,6 +1,5 @@
-- [ ] Update `SessionManager.kt` with `moveSession` logic (DA/BAS movement, conflicts, path updates)
-- [ ] Update `WritingViewModel.kt` to expose `isDocumentSaved` and `moveCurrentDocument`
-- [ ] Update `WritingScreen.kt` UI: `ProjectItem` and `ProjectManagementDialog`
-- [ ] Verify DA and BAS files move together correctly
-- [ ] Verify editor updates (Font Color, future saves) after move
-- [ ] Verify error handling for conflicts and external project deletion
+- [x] Update `Project` data model with new configuration fields
+- [x] Update `ProjectManager` for metadata migration and persistence
+- [x] Update `SessionManager` to support configurable paths and prefixes
+- [x] Implement renaming logic during project move in `SessionManager`
+- [ ] Verify implementation with manual tests

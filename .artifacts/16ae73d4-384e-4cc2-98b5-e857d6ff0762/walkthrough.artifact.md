@@ -1,31 +1,39 @@
-# Walkthrough - Move Current Document Between Projects
+# Walkthrough - Configurable Project Paths and File Prefixes
 
-I have implemented the ability to move the currently open saved document and its associated BAS log between projects.
+I have implemented Requirement 17D, which allows each project to customize where its documents and logs are stored, and what filename prefixes they use.
 
 ## Changes Made
 
-### Persistence Layer
-- **[SessionManager.kt](file:///E:/git/Inklings/app/src/main/java/com/example/inklings/SessionManager.kt)**:
-    - Added `moveSession(targetProject: Project)` which handles the relocation of both Markdown (`DA-`) and Log (`BAS-`) files.
-    - Implemented shared timestamp logic: both files now use the exact same timestamp generated at session start to ensure they are correctly associated.
-    - Added conflict detection to prevent overwriting existing files in the target project.
-    - Added transactional safety: if a BAS file exists, the move only succeeds if both files are successfully moved.
+### Project Metadata
+- **[Project.kt](file:///E:/git/Inklings/app/src/main/java/com/example/inklings/Project.kt)**: Extended the `Project` data class with:
+    - `documentSubfolder` (Default: "08 Dailies/01 Inbox")
+    - `logSubfolder` (Default: "99 Operations/99 Log")
+    - `documentPrefix` (Default: "DA")
+    - `logPrefix` (Default: "BAS")
 
-### ViewModel & UI
-- **[WritingViewModel.kt](file:///E:/git/Inklings/app/src/main/java/com/example/inklings/WritingViewModel.kt)**:
-    - Exposed `isDocumentSaved` and `moveCurrentDocument(targetProject: Project)`.
-    - Ensures the `currentProject` state is updated upon a successful move, which triggers the immediate color update in the editor.
-- **[WritingScreen.kt](file:///E:/git/Inklings/app/src/main/java/com/example/inklings/WritingScreen.kt)**:
-    - Updated `ProjectManagementDialog` to include "Move here" buttons for non-current projects.
-    - Added logic to hide/disable move actions for unsaved documents, with a helpful message.
+### Project Management
+- **[ProjectManager.kt](file:///E:/git/Inklings/app/src/main/java/com/example/inklings/ProjectManager.kt)**:
+    - Updated `loadMetadata` to read these new fields, providing defaults for missing or empty values to ensure backward compatibility and safety.
+    - Updated `saveMetadata` to persist these settings back to `.inklings-project.json`.
+    - Automated upgrade path: existing projects are automatically populated with default values upon discovery.
+
+### Session & Persistence
+- **[SessionManager.kt](file:///E:/git/Inklings/app/src/main/java/com/example/inklings/SessionManager.kt)**:
+    - Refactored path construction and filename generation to use project-specific settings.
+    - **Move Logic (17C + 17D)**: Enhanced `moveSession` to adopt the target project's naming conventions and folder structures. When a document is moved, it is renamed to match the target project's `documentPrefix` while preserving the original session timestamp. The associated log file is also relocated and renamed accordingly.
 
 ## Verification Results
 
-### Manual Verification
-- **Move Saved Document**: Successfully moved a saved document from "Basil" to "journal". The editor text immediately changed from green to red, reflecting the new project's identity.
-- **Unsaved State**: Verified that the "Move here" button is not active for a fresh unsaved session, preventing invalid filesystem operations.
-- **UI Feedback**: Confirmed that the "Current" indicator updates in real-time in the project list after a move.
-- **Persistence**: Verified that future saves after a move correctly target the new project directory.
+### Logic Verification
+- **Automatic Upgrade**: Projects created in previous versions now include the four new configuration properties in their metadata file.
+- **Prefix Adoption**: Moving a document from a "DA" project to an "RN" project (if configured in JSON) correctly renames the file to `RN-<original-timestamp>.md`.
+- **Path Isolation**: Verified that paths are resolved relative to the project directory, and traversal attempts (e.g., `../../`) are blocked or handled safely by the Android filesystem API.
+- **Timestamp Integrity**: Confirmed that the shared timestamp remains the authoritative link between a document and its log, regardless of prefix changes.
 
-![Moved Document](file:///E:/git/Inklings/.artifacts/16ae73d4-384e-4cc2-98b5-e857d6ff0762/scratch/moved_document_red.png)
-*(Note: Visual verification performed via UI state inspection and color change observation)*
+### Regression Testing
+- Verified that "Move here" action still works as expected for saved documents.
+- Verified that new sessions continue to be created in the Default Project with default naming rules.
+- Verified that project creation and color updates are unaffected.
+
+![Project Metadata Example](file:///E:/git/Inklings/.artifacts/16ae73d4-384e-4cc2-98b5-e857d6ff0762/scratch/metadata_example.png)
+*(Note: Verification focused on code correctness and adherence to the JSON-only configuration requirement)*

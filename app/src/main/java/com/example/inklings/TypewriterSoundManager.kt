@@ -3,12 +3,15 @@ package com.example.inklings
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-class TypewriterSoundManager(context: Context) {
+class TypewriterSoundManager(private val context: Context) {
 
     private val soundPool: SoundPool = SoundPool.Builder()
-        .setMaxStreams(5)
+        .setMaxStreams(10) // Increased to support simultaneous pops if needed
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
@@ -20,6 +23,23 @@ class TypewriterSoundManager(context: Context) {
     private val ks1Id = soundPool.load(context, R.raw.typewriter_ks1, 1)
     private val ks2Id = soundPool.load(context, R.raw.typewriter_ks2, 1)
     private val spaceId = soundPool.load(context, R.raw.typewriter_space, 1)
+
+    // Requirement 18: Load pop.mp3 from assets.
+    private var popId = -1
+
+    init {
+        try {
+            val assetFileDescriptor = context.assets.openFd("pop.wav")
+            popId = soundPool.load(assetFileDescriptor, 1)
+            android.util.Log.d("SoundManager", "pop.wav requested for loading, assigned ID: $popId")
+            
+            soundPool.setOnLoadCompleteListener { _, sampleId, status ->
+                android.util.Log.d("SoundManager", "Sound loaded: ID=$sampleId, Status=$status")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("SoundManager", "Failed to load pop.wav from assets", e)
+        }
+    }
 
     private var lastSoundId = -1
     private var consecutiveCount = 0
@@ -64,9 +84,27 @@ class TypewriterSoundManager(context: Context) {
         consecutiveCount = 0
     }
 
+    /**
+     * Requirement 18: Play pop.mp3 exactly 3 times sequentially.
+     * Uses a short delay to ensure distinct pops.
+     */
+    fun playPopThreeTimes(scope: CoroutineScope) {
+        if (popId == -1) return
+        
+        scope.launch {
+            repeat(3) {
+                playSound(popId)
+                delay(1000) // Requirement 18: 1 second delay between pops
+            }
+        }
+    }
+
     private fun playSound(soundId: Int) {
         if (soundId != -1) {
+            android.util.Log.d("SoundManager", "Playing sound: $soundId")
             soundPool.play(soundId, 1f, 1f, 1, 0, 1f)
+        } else {
+            android.util.Log.w("SoundManager", "Attempted to play invalid sound ID (-1)")
         }
     }
 

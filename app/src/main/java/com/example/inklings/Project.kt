@@ -11,7 +11,11 @@ import androidx.core.graphics.ColorUtils
 data class Project(
     val name: String,
     val baseFontColor: String,
-    val isDefault: Boolean
+    val isDefault: Boolean,
+    val documentSubfolder: String = "08 Dailies/01 Inbox",
+    val logSubfolder: String = "99 Operations/99 Log",
+    val documentPrefix: String = "DA",
+    val logPrefix: String = "BAS"
 ) {
     /**
      * Requirement 17B Update: Derive a theme-safe color from the base color.

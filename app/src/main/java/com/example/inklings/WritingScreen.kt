@@ -101,6 +101,9 @@ fun WritingScreen(
     var editingProject by remember { mutableStateOf<Project?>(null) }
     var showCreateProjectDialog by remember { mutableStateOf(false) }
     
+    // Requirement 18: Rename dialog
+    var showRenameDialog by rememberSaveable { mutableStateOf(false) }
+    
     // Requirement 10C: Fade behavior is modularized.
     // Requirement 10A (Progressive Line Fade) is intentionally retained and available for future reuse.
     // A future setting will allow the user to select between fade modes.
@@ -421,6 +424,18 @@ fun WritingScreen(
                         },
                         tint = primaryColor
                     )
+
+                    // Requirement 18: Rename Action
+                    if (viewModel.isDocumentSaved) {
+                        ActionButton(
+                            icon = Icons.Outlined.Edit,
+                            contentDescription = "RENAME",
+                            onClick = {
+                                showRenameDialog = true
+                            },
+                            tint = primaryColor
+                        )
+                    }
                 }
             }
 
@@ -511,6 +526,16 @@ fun WritingScreen(
                         showProjectPanel = false
                     },
                     onDismiss = { showProjectPanel = false }
+                )
+            }
+
+            if (showRenameDialog) {
+                RenameDialog(
+                    onRename = { title ->
+                        viewModel.renameCurrentDocument(title)
+                        showRenameDialog = false
+                    },
+                    onDismiss = { showRenameDialog = false }
                 )
             }
 
@@ -1178,4 +1203,58 @@ fun ColorSwatch(hex: String, isSelected: Boolean, onClick: () -> Unit) {
             )
             .clickable(onClick = onClick)
     )
+}
+
+/**
+ * Requirement 18: Dialog to rename the current document.
+ */
+@Composable
+fun RenameDialog(
+    onRename: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.fillMaxWidth(0.9f).padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "Rename document",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("CANCEL")
+                    }
+                    TextButton(
+                        onClick = { if (title.isNotBlank()) onRename(title) },
+                        enabled = title.isNotBlank()
+                    ) {
+                        Text("RENAME")
+                    }
+                }
+            }
+        }
+    }
 }

@@ -18,11 +18,18 @@ import java.util.Locale
 class SessionManager(private val context: Context, var project: Project) {
 
     private var projectRootPath = "Documents/Inklings/${project.name}"
-    private var relativePath = "$projectRootPath/08 Dailies/01 Inbox"
+    // Requirement 17D: Path is relative to the Project directory.
+    private var relativePath = "$projectRootPath/${project.documentSubfolder}"
     
     // Requirement 17C: Store the specific date to ensure DA and BAS share the exact same timestamp.
     private val sessionDate = Date()
-    val sessionFileName: String = generateSessionFileName(sessionDate)
+    
+    // Requirement 18: Optional document title.
+    private var currentTitle: String? = null
+    
+    // Requirement 17D & 18: Filename uses the project's documentPrefix and optional title.
+    var sessionFileName: String = generateSessionFileName(sessionDate, project.documentPrefix, currentTitle)
+        private set
     private var sessionUri: Uri? = null
 
     // Requirement 16: Track whether the main document has been successfully saved at least once.
@@ -31,19 +38,25 @@ class SessionManager(private val context: Context, var project: Project) {
         private set
 
     /**
-     * Requirement 32 & 17C: Timestamp convention remains unchanged to maintain DA/BAS association.
-     * Both files share the same timestamp derived from the session start.
+     * Requirement 32 & 17C & 17D & 18: Timestamp convention remains unchanged.
+     * Prefix is now configurable per project.
+     * Optional title is inserted between the Day and Time.
      */
-    private fun generateSessionFileName(date: Date): String {
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd-EEE-HH_mm_ss", Locale.US)
-        val formattedDate = dateFormat.format(date).uppercase(Locale.US)
-        return "DA-$formattedDate.md"
+    private fun generateSessionFileName(date: Date, prefix: String, title: String?): String {
+        val datePart = SimpleDateFormat("yyyy-MM-dd-EEE", Locale.US).format(date).uppercase(Locale.US)
+        val timePart = SimpleDateFormat("HH_mm_ss", Locale.US).format(date)
+        
+        return if (title.isNullOrBlank()) {
+            "$prefix-$datePart-$timePart.md"
+        } else {
+            "$prefix-$datePart-$title-$timePart.md"
+        }
     }
 
-    private fun generateLogFileName(date: Date): String {
+    private fun generateLogFileName(date: Date, prefix: String): String {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd-EEE-HH_mm_ss", Locale.US)
         val formattedDate = dateFormat.format(date).uppercase(Locale.US)
-        return "BAS-$formattedDate.md"
+        return "$prefix-$formattedDate.md"
     }
 
     fun saveDocument(content: String): Result<Unit> {
@@ -64,10 +77,11 @@ class SessionManager(private val context: Context, var project: Project) {
     }
 
     /**
-     * Requirement 39 & 17C: Existing log behavior remains intact, now stored under the Project path.
-     * The BAS file uses the same timestamp as the DA file for association.
+     * Requirement 39 & 17C & 17D & 18: Existing log behavior remains intact.
+     * Now uses project-specific logSubfolder and logPrefix.
+     * Includes document word count.
      */
-    fun saveTimeLog(minutes: Int): Result<Unit> {
+    fun saveTimeLog(minutes: Int, wordCount: Int): Result<Unit> {
         return try {
             val yearFormat = SimpleDateFormat("yyyy", Locale.US)
             val monthFormat = SimpleDateFormat("MM", Locale.US)
@@ -75,9 +89,11 @@ class SessionManager(private val context: Context, var project: Project) {
             val year = yearFormat.format(sessionDate)
             val month = monthFormat.format(sessionDate)
             
-            val logRelativePath = "$projectRootPath/99 Operations/99 Log/$year/$month"
-            val logFileName = generateLogFileName(sessionDate)
-            val content = "dailying:: $minutes"
+            val logRelativePath = "$projectRootPath/${project.logSubfolder}/$year/$month"
+            val logFileName = generateLogFileName(sessionDate, project.logPrefix)
+            
+            // Requirement 18 & 37: Authoritative entries for dailying and words.
+            val content = "dailying:: $minutes\nwords:: $wordCount"
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 saveWithMediaStore(content, logRelativePath, logFileName, isDocument = false)
@@ -160,28 +176,29 @@ class SessionManager(private val context: Context, var project: Project) {
     }
 
     /**
-     * Requirement 17C: Move the currently open saved document and its BAS file to another project.
-     * Transactional: succeeds only if both move (or DA moves and BAS doesn't exist).
-     * Rejects if conflicts exist in target project.
+     * Requirement 17C & 17D & 18: Move the currently open saved document and its BAS file to another project.
+     * Adopts the target project's configured subfolders and prefixes.
+     * Preserves optional title.
      */
     fun moveSession(targetProject: Project): Result<Unit> {
         if (!isDocumentSaved) return Result.failure(Exception("Document must be saved before moving"))
 
         val targetRootPath = "Documents/Inklings/${targetProject.name}"
-        val targetDaPath = "$targetRootPath/08 Dailies/01 Inbox"
+        val targetDaPath = "$targetRootPath/${targetProject.documentSubfolder}"
+        val targetDaFileName = generateSessionFileName(sessionDate, targetProject.documentPrefix, currentTitle)
         
         val yearFormat = SimpleDateFormat("yyyy", Locale.US)
         val monthFormat = SimpleDateFormat("MM", Locale.US)
         val year = yearFormat.format(sessionDate)
         val month = monthFormat.format(sessionDate)
-        val targetBasPath = "$targetRootPath/99 Operations/99 Log/$year/$month"
-        val logFileName = generateLogFileName(sessionDate)
+        val targetBasPath = "$targetRootPath/${targetProject.logSubfolder}/$year/$month"
+        val targetLogFileName = generateLogFileName(sessionDate, targetProject.logPrefix)
 
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                moveWithMediaStore(targetProject, targetDaPath, targetBasPath, logFileName)
+                moveWithMediaStore(targetProject, targetDaPath, targetDaFileName, targetBasPath, targetLogFileName)
             } else {
-                moveWithLegacyStorage(targetProject, targetDaPath, targetBasPath, logFileName)
+                moveWithLegacyStorage(targetProject, targetDaPath, targetDaFileName, targetBasPath, targetLogFileName)
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -191,16 +208,17 @@ class SessionManager(private val context: Context, var project: Project) {
     private fun moveWithMediaStore(
         targetProject: Project,
         targetDaPath: String,
+        targetDaFileName: String,
         targetBasPath: String,
-        logFileName: String
+        targetLogFileName: String
     ): Result<Unit> {
         val resolver = context.contentResolver
         
         // 1. Check for conflicts
-        if (findExistingUri(sessionFileName, targetDaPath) != null) {
+        if (findExistingUri(targetDaFileName, targetDaPath) != null) {
             return Result.failure(Exception("Target file already exists in ${targetProject.name}"))
         }
-        if (findExistingUri(logFileName, targetBasPath) != null) {
+        if (findExistingUri(targetLogFileName, targetBasPath) != null) {
             return Result.failure(Exception("Target log file already exists in ${targetProject.name}"))
         }
 
@@ -208,32 +226,38 @@ class SessionManager(private val context: Context, var project: Project) {
         val daUri = sessionUri ?: findExistingUri(sessionFileName, relativePath)
             ?: return Result.failure(Exception("Source document not found"))
         
-        val basSourcePath = "$projectRootPath/99 Operations/99 Log/${SimpleDateFormat("yyyy", Locale.US).format(sessionDate)}/${SimpleDateFormat("MM", Locale.US).format(sessionDate)}"
-        val basUri = findExistingUri(logFileName, basSourcePath)
+        val currentLogFileName = generateLogFileName(sessionDate, project.logPrefix)
+        val basSourcePath = "$projectRootPath/${project.logSubfolder}/${SimpleDateFormat("yyyy", Locale.US).format(sessionDate)}/${SimpleDateFormat("MM", Locale.US).format(sessionDate)}"
+        val basUri = findExistingUri(currentLogFileName, basSourcePath)
 
-        // 3. Move DA
+        // 3. Move/Rename DA
         val daValues = ContentValues().apply {
             put(MediaStore.MediaColumns.RELATIVE_PATH, targetDaPath)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, targetDaFileName)
         }
         if (resolver.update(daUri, daValues, null, null) <= 0) {
             return Result.failure(Exception("Failed to move document"))
         }
 
-        // 4. Move BAS if exists
+        // 4. Move/Rename BAS if exists
         if (basUri != null) {
             val basValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, targetBasPath)
+                put(MediaStore.MediaColumns.DISPLAY_NAME, targetLogFileName)
             }
             if (resolver.update(basUri, basValues, null, null) <= 0) {
-                // Rollback DA move (optional but good for consistency)
-                daValues.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-                resolver.update(daUri, daValues, null, null)
+                // Rollback DA move
+                val rollbackDaValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, sessionFileName)
+                }
+                resolver.update(daUri, rollbackDaValues, null, null)
                 return Result.failure(Exception("Failed to move associated log file"))
             }
         }
 
         // 5. Update State
-        updateInternalPaths(targetProject)
+        updateInternalPaths(targetProject, targetDaFileName)
         sessionUri = daUri
         return Result.success(Unit)
     }
@@ -241,16 +265,18 @@ class SessionManager(private val context: Context, var project: Project) {
     private fun moveWithLegacyStorage(
         targetProject: Project,
         targetDaPath: String,
+        targetDaFileName: String,
         targetBasPath: String,
-        logFileName: String
+        targetLogFileName: String
     ): Result<Unit> {
         val rootDir = Environment.getExternalStorageDirectory()
         val sourceDaFile = File(rootDir, "$relativePath/$sessionFileName")
-        val targetDaFile = File(rootDir, "$targetDaPath/$sessionFileName")
+        val targetDaFile = File(rootDir, "$targetDaPath/$targetDaFileName")
         
-        val basSourcePath = "$projectRootPath/99 Operations/99 Log/${SimpleDateFormat("yyyy", Locale.US).format(sessionDate)}/${SimpleDateFormat("MM", Locale.US).format(sessionDate)}"
-        val sourceBasFile = File(rootDir, "$basSourcePath/$logFileName")
-        val targetBasFile = File(rootDir, "$targetBasPath/$logFileName")
+        val currentLogFileName = generateLogFileName(sessionDate, project.logPrefix)
+        val basSourcePath = "$projectRootPath/${project.logSubfolder}/${SimpleDateFormat("yyyy", Locale.US).format(sessionDate)}/${SimpleDateFormat("MM", Locale.US).format(sessionDate)}"
+        val sourceBasFile = File(rootDir, "$basSourcePath/$currentLogFileName")
+        val targetBasFile = File(rootDir, "$targetBasPath/$targetLogFileName")
 
         // 1. Check conflicts
         if (targetDaFile.exists()) return Result.failure(Exception("Target file already exists"))
@@ -271,13 +297,88 @@ class SessionManager(private val context: Context, var project: Project) {
             }
         }
 
-        updateInternalPaths(targetProject)
+        updateInternalPaths(targetProject, targetDaFileName)
         return Result.success(Unit)
     }
 
-    private fun updateInternalPaths(newProject: Project) {
+    /**
+     * Requirement 18: Rename the currently saved Markdown document.
+     * Only works if document has been saved.
+     * Preserves original session timestamp and project prefix.
+     */
+    fun renameDocument(newTitle: String): Result<Unit> {
+        if (!isDocumentSaved) return Result.failure(Exception("Only saved documents can be renamed"))
+        
+        val trimmedTitle = newTitle.trim()
+        if (trimmedTitle.isBlank()) return Result.failure(Exception("Title cannot be empty"))
+        
+        // Basic validation for safe filenames
+        val invalidChars = charArrayOf('/', '\\', ':', '*', '?', '"', '<', '>', '|')
+        if (trimmedTitle.any { it in invalidChars }) {
+            return Result.failure(Exception("Title contains invalid characters"))
+        }
+
+        val nextFileName = generateSessionFileName(sessionDate, project.documentPrefix, trimmedTitle)
+        if (nextFileName == sessionFileName) return Result.success(Unit) // No change
+
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                renameWithMediaStore(nextFileName, trimmedTitle)
+            } else {
+                renameWithLegacyStorage(nextFileName, trimmedTitle)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun renameWithMediaStore(nextFileName: String, nextTitle: String): Result<Unit> {
+        val resolver = context.contentResolver
+        
+        // Check for conflicts
+        if (findExistingUri(nextFileName, relativePath) != null) {
+            return Result.failure(Exception("File with this title already exists in project"))
+        }
+
+        val uri = sessionUri ?: findExistingUri(sessionFileName, relativePath)
+            ?: return Result.failure(Exception("Source document not found"))
+
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, nextFileName)
+        }
+
+        return if (resolver.update(uri, values, null, null) > 0) {
+            this.sessionFileName = nextFileName
+            this.currentTitle = nextTitle
+            this.sessionUri = uri
+            Result.success(Unit)
+        } else {
+            Result.failure(Exception("Failed to rename file"))
+        }
+    }
+
+    private fun renameWithLegacyStorage(nextFileName: String, nextTitle: String): Result<Unit> {
+        val rootDir = Environment.getExternalStorageDirectory()
+        val sourceFile = File(rootDir, "$relativePath/$sessionFileName")
+        val targetFile = File(rootDir, "$relativePath/$nextFileName")
+
+        if (targetFile.exists()) return Result.failure(Exception("File with this title already exists"))
+
+        return if (sourceFile.renameTo(targetFile)) {
+            this.sessionFileName = nextFileName
+            this.currentTitle = nextTitle
+            Result.success(Unit)
+        } else {
+            Result.failure(Exception("Failed to rename file"))
+        }
+    }
+
+    private fun updateInternalPaths(newProject: Project, newFileName: String? = null) {
         this.project = newProject
         this.projectRootPath = "Documents/Inklings/${newProject.name}"
-        this.relativePath = "$projectRootPath/08 Dailies/01 Inbox"
+        this.relativePath = "$projectRootPath/${newProject.documentSubfolder}"
+        if (newFileName != null) {
+            this.sessionFileName = newFileName
+        }
     }
 }

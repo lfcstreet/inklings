@@ -54,13 +54,15 @@ class ProjectManager(private val context: Context) {
 
     /**
      * Requirement 20, 21: Update metadata for an existing project.
+     * Preserves internal configuration paths and prefixes (Requirement 17D).
      */
     fun updateProjectMetadata(name: String, baseFontColor: String, isDefault: Boolean): Result<Project> {
         val projectDir = File(rootDir, name)
         if (!projectDir.exists()) return Result.failure(Exception("Project directory does not exist"))
 
         return try {
-            val updatedProject = Project(name, baseFontColor, isDefault)
+            val existing = loadMetadata(projectDir) ?: initializeMissingMetadata(projectDir)
+            val updatedProject = existing.copy(baseFontColor = baseFontColor, isDefault = isDefault)
             saveMetadata(projectDir, updatedProject)
             
             if (isDefault) {
@@ -129,8 +131,7 @@ class ProjectManager(private val context: Context) {
     private fun discoverProjects(): List<Project> {
         val subDirs = rootDir.listFiles { file -> file.isDirectory } ?: emptyArray()
         return subDirs.map { dir ->
-            val metadata = loadMetadata(dir) ?: initializeMissingMetadata(dir)
-            Project(dir.name, metadata.baseFontColor, metadata.isDefault)
+            loadMetadata(dir) ?: initializeMissingMetadata(dir)
         }
     }
 
@@ -146,10 +147,17 @@ class ProjectManager(private val context: Context) {
             } else {
                 json.optString("fontColor", DEFAULT_FONT_COLOR)
             }
+            
+            // Requirement 17D: Read configurable paths and prefixes with defaults.
+            // Empty strings are handled as defaults per Requirement 24.
             Project(
                 name = projectDir.name,
                 baseFontColor = color,
-                isDefault = json.optBoolean("isDefault", false)
+                isDefault = json.optBoolean("isDefault", false),
+                documentSubfolder = json.optString("documentSubfolder", "08 Dailies/01 Inbox").ifEmpty { "08 Dailies/01 Inbox" },
+                logSubfolder = json.optString("logSubfolder", "99 Operations/99 Log").ifEmpty { "99 Operations/99 Log" },
+                documentPrefix = json.optString("documentPrefix", "DA").ifEmpty { "DA" },
+                logPrefix = json.optString("logPrefix", "BAS").ifEmpty { "BAS" }
             )
         } catch (e: Exception) {
             Log.e("ProjectManager", "Failed to load metadata for ${projectDir.name}", e)
@@ -162,6 +170,11 @@ class ProjectManager(private val context: Context) {
         val json = JSONObject().apply {
             put("baseFontColor", project.baseFontColor)
             put("isDefault", project.isDefault)
+            // Requirement 17D: Persist configurable paths and prefixes.
+            put("documentSubfolder", project.documentSubfolder)
+            put("logSubfolder", project.logSubfolder)
+            put("documentPrefix", project.documentPrefix)
+            put("logPrefix", project.logPrefix)
         }
         metadataFile.writeText(json.toString(2))
     }

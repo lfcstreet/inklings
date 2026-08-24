@@ -44,8 +44,8 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     var currentProject by mutableStateOf(projectManager.getDefaultProject())
         private set
 
-    val isDocumentSaved: Boolean
-        get() = sessionManager.isDocumentSaved
+    var isDocumentSaved by mutableStateOf(false)
+        private set
 
     // Timer state (Requirement 15)
     var timerState by mutableStateOf(TimerState.STOPPED)
@@ -97,6 +97,11 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         // 2. Previously saved document -> always save to allow intentional clearing/emptying of the file.
         // Empty-content status is NOT used as the saved-state indicator.
         return sessionManager.isDocumentSaved || content.isNotBlank()
+    }
+
+    private fun calculateWordCount(text: String): Int {
+        // Requirement 18: Non-empty sequence separated by whitespace.
+        return text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.size
     }
 
     fun updateText(newValue: TextFieldValue) {
@@ -272,6 +277,7 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
             val result = sessionManager.saveDocument(content)
             if (result.isSuccess) {
                 lastSavedText = content
+                isDocumentSaved = true
                 if (!silent) {
                     _uiEvent.emit(UiEvent.ShowToast("Saved: ${sessionManager.sessionFileName}"))
                 }
@@ -290,8 +296,11 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         }
 
         val minutes = calculateTotalMinutes(endTime)
+        // Requirement 18: Include word count in log.
+        val wordCount = calculateWordCount(textFieldValue.text)
+        
         if (minutes >= 1) {
-            val result = sessionManager.saveTimeLog(minutes)
+            val result = sessionManager.saveTimeLog(minutes, wordCount)
             if (result.isFailure) {
                 _uiEvent.emit(UiEvent.ShowError("Time Log Error: ${result.exceptionOrNull()?.message ?: "Unknown error"}"))
                 return false
@@ -332,6 +341,7 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         val defaultProject = projectManager.getDefaultProject()
         currentProject = defaultProject
         sessionManager = SessionManager(getApplication(), defaultProject)
+        isDocumentSaved = false
         textFieldValue = TextFieldValue("")
         lastSavedText = ""
         totalAccumulatedMillis = 0L
@@ -381,6 +391,12 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         if (timerState == TimerState.COMPLETED || remainingTimeMillis <= 0L) {
             resetTimer()
         }
+        
+        // Requirement 18: Play pop sound 3 times on fresh start (not resume).
+        if (timerState == TimerState.STOPPED) {
+            soundManager.playPopThreeTimes(viewModelScope)
+        }
+        
         timerState = TimerState.RUNNING
         val initialRemaining = remainingTimeMillis
         val startTime = System.currentTimeMillis()
@@ -393,6 +409,8 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
                 
                 if (remainingTimeMillis <= 0L) {
                     timerState = TimerState.COMPLETED
+                    // Requirement 18: Play pop sound 3 times on natural completion.
+                    soundManager.playPopThreeTimes(viewModelScope)
                     _showCompletionFlash.emit(Unit)
                     break
                 }
@@ -462,7 +480,8 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
-     * Requirement 17C: Move current document and its BAS log to another project.
+     * Requirement 17C & 17D: Move current document and its BAS log to another project.
+     * Adopts the target project's path and prefix configurations.
      * Updates currentProject association and emits UI events upon success.
      */
     fun moveCurrentDocument(targetProject: Project) {
@@ -470,9 +489,25 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
             val result = sessionManager.moveSession(targetProject)
             if (result.isSuccess) {
                 currentProject = targetProject
-                _uiEvent.emit(UiEvent.ShowToast("Moved to ${targetProject.name}"))
+                isDocumentSaved = true // Moving implies it was saved
+                _uiEvent.emit(UiEvent.ShowToast("Moved to ${targetProject.name} as ${sessionManager.sessionFileName}"))
             } else {
                 val error = result.exceptionOrNull()?.message ?: "Move failed"
+                _uiEvent.emit(UiEvent.ShowError(error))
+            }
+        }
+    }
+
+    /**
+     * Requirement 18: Rename current document.
+     */
+    fun renameCurrentDocument(title: String) {
+        viewModelScope.launch {
+            val result = sessionManager.renameDocument(title)
+            if (result.isSuccess) {
+                _uiEvent.emit(UiEvent.ShowToast("Renamed to: ${sessionManager.sessionFileName}"))
+            } else {
+                val error = result.exceptionOrNull()?.message ?: "Rename failed"
                 _uiEvent.emit(UiEvent.ShowError(error))
             }
         }
