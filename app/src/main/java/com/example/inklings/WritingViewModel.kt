@@ -38,8 +38,14 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     var isSoundEnabled by mutableStateOf(settingsManager.isTypewriterSoundEnabled)
         private set
 
+    var allProjects by mutableStateOf(projectManager.getAllProjects())
+        private set
+
     var currentProject by mutableStateOf(projectManager.getDefaultProject())
         private set
+
+    val isDocumentSaved: Boolean
+        get() = sessionManager.isDocumentSaved
 
     // Timer state (Requirement 15)
     var timerState by mutableStateOf(TimerState.STOPPED)
@@ -316,6 +322,12 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /**
+     * Requirement 25, 26: New writing sessions bind to the Default Project 
+     * at the moment they are created. 
+     * Requirement 30: Changing the Default Project later does not move or redirect
+     * the current active session; it only affects future sessions.
+     */
     private fun resetToNewSession(silent: Boolean) {
         val defaultProject = projectManager.getDefaultProject()
         currentProject = defaultProject
@@ -413,6 +425,57 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     fun toggleSound() {
         isSoundEnabled = !isSoundEnabled
         settingsManager.isTypewriterSoundEnabled = isSoundEnabled
+    }
+
+    /**
+     * Requirement 5, 33: Refresh projects from filesystem when UI opens.
+     */
+    fun refreshProjects() {
+        allProjects = projectManager.refresh()
+        // If current project was deleted externally, it might not be in the list anymore.
+        // SessionManager still has the path, but we should update our local currentProject if it matches.
+        val updatedCurrent = allProjects.find { it.name == currentProject.name }
+        if (updatedCurrent != null) {
+            currentProject = updatedCurrent
+        }
+    }
+
+    /**
+     * Requirement 10, 11, 22: Create new project and optionally make it default.
+     */
+    fun createProject(name: String, baseFontColor: String, isDefault: Boolean): Result<Project> {
+        val result = projectManager.createProject(name, baseFontColor, isDefault)
+        if (result.isSuccess) {
+            refreshProjects()
+        }
+        return result
+    }
+
+    /**
+     * Requirement 13, 20: Update project metadata (Color, Default status).
+     */
+    fun updateProject(name: String, baseFontColor: String, isDefault: Boolean) {
+        val result = projectManager.updateProjectMetadata(name, baseFontColor, isDefault)
+        if (result.isSuccess) {
+            refreshProjects()
+        }
+    }
+
+    /**
+     * Requirement 17C: Move current document and its BAS log to another project.
+     * Updates currentProject association and emits UI events upon success.
+     */
+    fun moveCurrentDocument(targetProject: Project) {
+        viewModelScope.launch {
+            val result = sessionManager.moveSession(targetProject)
+            if (result.isSuccess) {
+                currentProject = targetProject
+                _uiEvent.emit(UiEvent.ShowToast("Moved to ${targetProject.name}"))
+            } else {
+                val error = result.exceptionOrNull()?.message ?: "Move failed"
+                _uiEvent.emit(UiEvent.ShowError(error))
+            }
+        }
     }
 
     override fun onCleared() {

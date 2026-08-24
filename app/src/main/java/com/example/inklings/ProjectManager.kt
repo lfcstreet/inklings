@@ -39,10 +39,47 @@ class ProjectManager(private val context: Context) {
         migrateExistingStructure()
         ensureDefaultProjectExists()
         
+        return refresh()
+    }
+
+    /**
+     * Requirement 5, 33, 34: Refresh project list from filesystem.
+     * Called when the Project UI is opened to reflect external additions/deletions.
+     */
+    fun refresh(): List<Project> {
         projectList = discoverProjects()
         reconcileDefaultStatus()
-        
         return projectList
+    }
+
+    /**
+     * Requirement 20, 21: Update metadata for an existing project.
+     */
+    fun updateProjectMetadata(name: String, baseFontColor: String, isDefault: Boolean): Result<Project> {
+        val projectDir = File(rootDir, name)
+        if (!projectDir.exists()) return Result.failure(Exception("Project directory does not exist"))
+
+        return try {
+            val updatedProject = Project(name, baseFontColor, isDefault)
+            saveMetadata(projectDir, updatedProject)
+            
+            if (isDefault) {
+                // Requirement 21: Ensure only one default exists by disabling others.
+                projectList.forEach { p ->
+                    if (p.name != name && p.isDefault) {
+                        val otherDir = File(rootDir, p.name)
+                        if (otherDir.exists()) {
+                            saveMetadata(otherDir, p.copy(isDefault = false))
+                        }
+                    }
+                }
+            }
+            
+            refresh()
+            Result.success(updatedProject)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     /**
@@ -93,7 +130,7 @@ class ProjectManager(private val context: Context) {
         val subDirs = rootDir.listFiles { file -> file.isDirectory } ?: emptyArray()
         return subDirs.map { dir ->
             val metadata = loadMetadata(dir) ?: initializeMissingMetadata(dir)
-            Project(dir.name, metadata.fontColor, metadata.isDefault)
+            Project(dir.name, metadata.baseFontColor, metadata.isDefault)
         }
     }
 
@@ -103,9 +140,15 @@ class ProjectManager(private val context: Context) {
         
         return try {
             val json = JSONObject(metadataFile.readText())
+            // Requirement 17B Update: Backward compatibility for fontColor -> baseFontColor
+            val color = if (json.has("baseFontColor")) {
+                json.getString("baseFontColor")
+            } else {
+                json.optString("fontColor", DEFAULT_FONT_COLOR)
+            }
             Project(
                 name = projectDir.name,
-                fontColor = json.optString("fontColor", DEFAULT_FONT_COLOR),
+                baseFontColor = color,
                 isDefault = json.optBoolean("isDefault", false)
             )
         } catch (e: Exception) {
@@ -117,7 +160,7 @@ class ProjectManager(private val context: Context) {
     private fun saveMetadata(projectDir: File, project: Project) {
         val metadataFile = File(projectDir, METADATA_FILENAME)
         val json = JSONObject().apply {
-            put("fontColor", project.fontColor)
+            put("baseFontColor", project.baseFontColor)
             put("isDefault", project.isDefault)
         }
         metadataFile.writeText(json.toString(2))
@@ -173,7 +216,7 @@ class ProjectManager(private val context: Context) {
      * UI, renaming, in-app deletion, and moving files between projects are 
      * deliberately deferred to later requirements (17B, 17C).
      */
-    fun createProject(name: String, fontColor: String, isDefault: Boolean): Result<Project> {
+    fun createProject(name: String, baseFontColor: String, isDefault: Boolean): Result<Project> {
         val trimmedName = name.trim()
         if (trimmedName.isBlank()) return Result.failure(Exception("Project name cannot be empty"))
         
@@ -187,7 +230,7 @@ class ProjectManager(private val context: Context) {
         if (projectDir.exists()) return Result.failure(Exception("Project directory already exists"))
         
         return try {
-            val project = createProjectInternal(trimmedName, fontColor, isDefault)
+            val project = createProjectInternal(trimmedName, baseFontColor, isDefault)
             if (isDefault) {
                 projectList = projectList.map { p ->
                     if (p.name != trimmedName && p.isDefault) {
@@ -204,13 +247,13 @@ class ProjectManager(private val context: Context) {
         }
     }
 
-    private fun createProjectInternal(name: String, fontColor: String, isDefault: Boolean): Project {
+    private fun createProjectInternal(name: String, baseFontColor: String, isDefault: Boolean): Project {
         val projectDir = File(rootDir, name)
         projectDir.mkdirs()
         File(projectDir, "08 Dailies/01 Inbox").mkdirs()
         File(projectDir, "99 Operations/99 Log").mkdirs()
         
-        val project = Project(name, fontColor, isDefault)
+        val project = Project(name, baseFontColor, isDefault)
         saveMetadata(projectDir, project)
         return project
     }

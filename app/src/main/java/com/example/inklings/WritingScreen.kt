@@ -7,65 +7,47 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Pause
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Save
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -76,8 +58,11 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.core.graphics.toColorInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.inklings.ui.theme.CourierPrime
 import kotlinx.coroutines.delay
@@ -111,6 +96,11 @@ fun WritingScreen(
     // Requirement 14: Toggle visibility of settings panel
     var showSettingsPanel by rememberSaveable { mutableStateOf(false) }
     
+    // Requirement 17B: Toggle visibility of project management
+    var showProjectPanel by rememberSaveable { mutableStateOf(false) }
+    var editingProject by remember { mutableStateOf<Project?>(null) }
+    var showCreateProjectDialog by remember { mutableStateOf(false) }
+    
     // Requirement 10C: Fade behavior is modularized.
     // Requirement 10A (Progressive Line Fade) is intentionally retained and available for future reuse.
     // A future setting will allow the user to select between fade modes.
@@ -133,6 +123,13 @@ fun WritingScreen(
     val context = LocalContext.current
     val onSurfaceColor = MaterialTheme.colorScheme.onSurface
     val primaryColor = MaterialTheme.colorScheme.primary
+    val isDarkTheme = isSystemInDarkTheme()
+
+    // Requirement 17B: Get theme-aware font color from project.
+    // The project derives a contrast-safe color from the user's baseFontColor.
+    val projectFontColor = remember(viewModel.currentProject, isDarkTheme) {
+        Color(viewModel.currentProject.getThemeAwareColor(isDarkTheme))
+    }
 
     // Requirement 15: Timer completion state (replaces flash with red color for 2s)
     var isTimerCompletionColorActive by remember { mutableStateOf(false) }
@@ -169,7 +166,7 @@ fun WritingScreen(
     }
 
     // Visual transformation to apply calculated alphas
-    val fadeTransformation = remember(isDistractionFreeMode, visibleRanges, onSurfaceColor, isTimerCompletionColorActive) {
+    val fadeTransformation = remember(isDistractionFreeMode, visibleRanges, projectFontColor, isTimerCompletionColorActive) {
         VisualTransformation { text ->
             val annotated = buildAnnotatedString {
                 append(text.text)
@@ -185,9 +182,12 @@ fun WritingScreen(
                         val start = maxOf(0, range.first)
                         val end = minOf(len, range.last)
                         if (start < end) {
-                            addStyle(SpanStyle(color = onSurfaceColor.copy(alpha = alpha)), start, end)
+                            addStyle(SpanStyle(color = projectFontColor.copy(alpha = alpha)), start, end)
                         }
                     }
+                } else {
+                    // Normal mode / non-distraction mode: use project color
+                    addStyle(SpanStyle(color = projectFontColor), 0, text.length)
                 }
             }
             TransformedText(annotated, OffsetMapping.Identity)
@@ -389,7 +389,7 @@ fun WritingScreen(
                 }
             }
 
-            // Timer Action Button (Requirement 15)
+            // Timer & Project Action Buttons (Requirement 15 & 17B)
             // Positioned independently on the right side center.
             AnimatedVisibility(
                 visible = showActionButtons,
@@ -399,14 +399,29 @@ fun WritingScreen(
                     .align(Alignment.CenterEnd)
                     .padding(end = 16.dp)
             ) {
-                TimerButton(
-                    state = viewModel.timerState,
-                    remainingMillis = viewModel.remainingTimeMillis,
-                    totalMillis = viewModel.totalDurationMillis,
-                    onToggle = { viewModel.toggleTimer() },
-                    onReset = { viewModel.resetTimer() },
-                    tint = primaryColor
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                ) {
+                    TimerButton(
+                        state = viewModel.timerState,
+                        remainingMillis = viewModel.remainingTimeMillis,
+                        totalMillis = viewModel.totalDurationMillis,
+                        onToggle = { viewModel.toggleTimer() },
+                        onReset = { viewModel.resetTimer() },
+                        tint = primaryColor
+                    )
+
+                    ActionButton(
+                        icon = Icons.Outlined.Folder,
+                        contentDescription = "PROJECTS",
+                        onClick = {
+                            viewModel.refreshProjects()
+                            showProjectPanel = true
+                        },
+                        tint = primaryColor
+                    )
+                }
             }
 
             // Settings Panel Overlay (Requirement 14 & 15)
@@ -473,6 +488,51 @@ fun WritingScreen(
                         }
                     }
                 }
+            }
+
+            // Project Management UI (Requirement 17B)
+            if (showProjectPanel) {
+                // Requirement 32: Selecting a project in this panel for editing 
+                // does NOT move the current document. Moving files belongs to 17C.
+                ProjectManagementDialog(
+                    projects = viewModel.allProjects,
+                    currentProject = viewModel.currentProject,
+                    isDocumentSaved = viewModel.isDocumentSaved,
+                    onProjectClick = { 
+                        editingProject = it
+                        showProjectPanel = false 
+                    },
+                    onMoveClick = {
+                        viewModel.moveCurrentDocument(it)
+                        showProjectPanel = false
+                    },
+                    onAddProject = { 
+                        showCreateProjectDialog = true
+                        showProjectPanel = false
+                    },
+                    onDismiss = { showProjectPanel = false }
+                )
+            }
+
+            if (showCreateProjectDialog) {
+                ProjectEditDialog(
+                    onSave = { name, color, isDefault ->
+                        viewModel.createProject(name, color, isDefault)
+                        showCreateProjectDialog = false
+                    },
+                    onDismiss = { showCreateProjectDialog = false }
+                )
+            }
+
+            if (editingProject != null) {
+                ProjectEditDialog(
+                    project = editingProject,
+                    onSave = { name, color, isDefault ->
+                        viewModel.updateProject(name, color, isDefault)
+                        editingProject = null
+                    },
+                    onDismiss = { editingProject = null }
+                )
             }
 
             // Typewriter scrolling logic
@@ -654,4 +714,468 @@ private fun findSentenceRange(text: String, index: Int): IntRange {
     }
     
     return IntRange(start, end)
+}
+
+/**
+ * Requirement 17B & 17C: Project Management Panel.
+ * Shows list of projects and allows moving the current document between them.
+ */
+@Composable
+fun ProjectManagementDialog(
+    projects: List<Project>,
+    currentProject: Project,
+    isDocumentSaved: Boolean,
+    onProjectClick: (Project) -> Unit,
+    onMoveClick: (Project) -> Unit,
+    onAddProject: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Projects",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    ActionButton(
+                        icon = Icons.Outlined.Add,
+                        contentDescription = "Add Project",
+                        onClick = onAddProject,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                HorizontalDivider()
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    projects.forEach { project ->
+                        val isCurrent = project.name == currentProject.name
+                        ProjectItem(
+                            project = project,
+                            isCurrent = isCurrent,
+                            onMoveClick = if (!isCurrent && isDocumentSaved) {
+                                { onMoveClick(project) }
+                            } else null,
+                            onClick = { onProjectClick(project) }
+                        )
+                    }
+                }
+                
+                if (!isDocumentSaved) {
+                    Text(
+                        text = "Save document to enable Move",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Row(modifier = Modifier.align(Alignment.End)) {
+                    TextButton(onClick = onDismiss) {
+                        Text("CLOSE")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProjectItem(
+    project: Project,
+    isCurrent: Boolean,
+    onMoveClick: (() -> Unit)? = null,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        val color = try {
+            Color(project.baseFontColor.toColorInt())
+        } catch (_: Exception) {
+            MaterialTheme.colorScheme.onSurface
+        }
+
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .background(color, RoundedCornerShape(4.dp))
+                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+        )
+
+        Text(
+            text = project.name,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f)
+        )
+
+        if (isCurrent) {
+            Text(
+                text = "Current",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+        } else if (onMoveClick != null) {
+            // Requirement 17C: Move here action
+            TextButton(
+                onClick = onMoveClick,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text(
+                    text = "Move here",
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+        }
+
+        if (project.isDefault) {
+            Text(
+                text = "Default",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+/**
+ * Requirement 17B Update: Dialog to create or edit a project.
+ * Supports visual color picking, manual hex entry, and theme-safe previews.
+ */
+@Composable
+fun ProjectEditDialog(
+    project: Project? = null, // null means create mode
+    onSave: (name: String, color: String, isDefault: Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf(project?.name ?: "") }
+    var color by remember { mutableStateOf(project?.baseFontColor ?: "#000000") }
+    var isDefault by remember { mutableStateOf(project?.isDefault ?: false) }
+
+    var hexInput by remember { mutableStateOf(color) }
+    var isHexValid by remember { mutableStateOf(true) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = if (project == null) "New Project" else "Edit ${project.name}",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                if (project == null) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Project Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+
+                Text("Font Color Selection", style = MaterialTheme.typography.titleSmall)
+
+                // Requirement 17B Update: Full-spectrum color picker
+                FullSpectrumColorPicker(
+                    initialColor = try { Color(color.toColorInt()) } catch (_: Exception) { Color.Black },
+                    onColorChanged = { newColor ->
+                        val hex = String.format("#%06X", (0xFFFFFF and newColor.toArgb()))
+                        color = hex
+                        hexInput = hex
+                        isHexValid = true
+                    }
+                )
+
+                // Requirement 17B Update: Manual Hex Entry
+                OutlinedTextField(
+                    value = hexInput,
+                    onValueChange = { input ->
+                        hexInput = input
+                        if (input.matches(Regex("^#[0-9A-Fa-f]{6}$"))) {
+                            color = input
+                            isHexValid = true
+                        } else {
+                            isHexValid = false
+                        }
+                    },
+                    label = { Text("Manual Hex (#RRGGBB)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    isError = !isHexValid,
+                    supportingText = if (!isHexValid) {
+                        { Text("Invalid hex format") }
+                    } else null
+                )
+
+                // Requirement 17B Update: Theme Adaptation Previews
+                Text("Theme Previews", style = MaterialTheme.typography.labelMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    val previewProject = Project("", color, false)
+                    
+                    ThemePreviewBox(
+                        label = "Light",
+                        backgroundColor = Color.White,
+                        textColor = Color(previewProject.getThemeAwareColor(false)),
+                        modifier = Modifier.weight(1f)
+                    )
+                    ThemePreviewBox(
+                        label = "Dark",
+                        backgroundColor = Color.Black,
+                        textColor = Color(previewProject.getThemeAwareColor(true)),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Default Project", style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = isDefault,
+                        onCheckedChange = { isDefault = it },
+                        enabled = !(project?.isDefault ?: false)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("CANCEL")
+                    }
+                    TextButton(
+                        onClick = { 
+                            if (name.isNotBlank() && isHexValid) {
+                                onSave(name, color, isDefault)
+                            }
+                        },
+                        enabled = name.isNotBlank() && isHexValid
+                    ) {
+                        Text("SAVE")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ThemePreviewBox(label: String, backgroundColor: Color, textColor: Color, modifier: Modifier = Modifier) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+    ) {
+        Text(text = label, style = MaterialTheme.typography.labelSmall)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .background(backgroundColor, RoundedCornerShape(8.dp))
+                .border(1.dp, Color.Gray.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Aa",
+                color = textColor,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+/**
+ * Requirement 17B Update: A visual full-spectrum color picker.
+ * Uses a Hue slider and a Saturation/Value box.
+ */
+@Composable
+fun FullSpectrumColorPicker(
+    initialColor: Color,
+    onColorChanged: (Color) -> Unit
+) {
+    val hsv = remember {
+        val hsvArr = FloatArray(3)
+        android.graphics.Color.colorToHSV(initialColor.toArgb(), hsvArr)
+        mutableStateListOf(hsvArr[0], hsvArr[1], hsvArr[2])
+    }
+
+    // Sync if initialColor changes externally (e.g. via hex field)
+    LaunchedEffect(initialColor) {
+        val hsvArr = FloatArray(3)
+        android.graphics.Color.colorToHSV(initialColor.toArgb(), hsvArr)
+        if (hsvArr[0] != hsv[0] || hsvArr[1] != hsv[1] || hsvArr[2] != hsv[2]) {
+            hsv[0] = hsvArr[0]
+            hsv[1] = hsvArr[1]
+            hsv[2] = hsvArr[2]
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Saturation-Value Square
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .drawBehind {
+                    // Draw HSV gradient
+                    val hueColor = Color.hsv(hsv[0], 1f, 1f)
+                    
+                    // Value gradient (Black to Top)
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(Color.White, Color.Transparent),
+                            startY = 0f,
+                            endY = size.height
+                        )
+                    )
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black),
+                            startY = 0f,
+                            endY = size.height
+                        )
+                    )
+                    
+                    // Saturation gradient (Transparent to Hue)
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(Color.White, hueColor),
+                            startX = 0f,
+                            endX = size.width
+                        ),
+                        blendMode = BlendMode.Modulate
+                    )
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures { change, _ ->
+                        val s = (change.position.x / size.width).coerceIn(0f, 1f)
+                        val v = 1f - (change.position.y / size.height).coerceIn(0f, 1f)
+                        hsv[1] = s
+                        hsv[2] = v
+                        onColorChanged(Color.hsv(hsv[0], hsv[1], hsv[2]))
+                    }
+                    detectTapGestures { offset ->
+                        val s = (offset.x / size.width).coerceIn(0f, 1f)
+                        val v = 1f - (offset.y / size.height).coerceIn(0f, 1f)
+                        hsv[1] = s
+                        hsv[2] = v
+                        onColorChanged(Color.hsv(hsv[0], hsv[1], hsv[2]))
+                    }
+                }
+        ) {
+            // SV Selection Indicator
+            val indicatorOffset = Offset(
+                x = hsv[1] * 1000f, // Simplified, will be updated by draw cycle
+                y = (1f - hsv[2]) * 1000f
+            )
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val x = hsv[1] * size.width
+                val y = (1f - hsv[2]) * size.height
+                drawCircle(
+                    color = if (hsv[2] > 0.5f) Color.Black else Color.White,
+                    radius = 8.dp.toPx(),
+                    center = Offset(x, y),
+                    style = Stroke(width = 2.dp.toPx())
+                )
+            }
+        }
+
+        // Hue Slider
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(24.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .drawBehind {
+                    val colors = (0..360).map { Color.hsv(it.toFloat(), 1f, 1f) }
+                    drawRect(brush = Brush.horizontalGradient(colors))
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures { change, _ ->
+                        hsv[0] = (change.position.x / size.width).coerceIn(0f, 1f) * 360f
+                        onColorChanged(Color.hsv(hsv[0], hsv[1], hsv[2]))
+                    }
+                    detectTapGestures { offset ->
+                        hsv[0] = (offset.x / size.width).coerceIn(0f, 1f) * 360f
+                        onColorChanged(Color.hsv(hsv[0], hsv[1], hsv[2]))
+                    }
+                }
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val x = (hsv[0] / 360f) * size.width
+                drawRect(
+                    color = Color.White,
+                    topLeft = Offset(x - 2.dp.toPx(), 0f),
+                    size = Size(4.dp.toPx(), size.height)
+                )
+                drawRect(
+                    color = Color.Black,
+                    topLeft = Offset(x - 2.dp.toPx(), 0f),
+                    size = Size(4.dp.toPx(), size.height),
+                    style = Stroke(width = 1.dp.toPx())
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ColorSwatch(hex: String, isSelected: Boolean, onClick: () -> Unit) {
+    val swatchColor = try { Color(hex.toColorInt()) } catch (_: Exception) { Color.Black }
+    
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .background(swatchColor, CircleShape)
+            .border(
+                width = if (isSelected) 3.dp else 1.dp,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.5f),
+                shape = CircleShape
+            )
+            .clickable(onClick = onClick)
+    )
 }

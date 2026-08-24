@@ -15,12 +15,14 @@ import java.util.Locale
  * Requirement 17A: Session and File persistence relative to a Project.
  * The internal folder structure (08 Dailies, 99 Operations) is preserved inside each project folder.
  */
-class SessionManager(private val context: Context, val project: Project) {
+class SessionManager(private val context: Context, var project: Project) {
 
-    private val projectRootPath = "Documents/Inklings/${project.name}"
-    private val relativePath = "$projectRootPath/08 Dailies/01 Inbox"
+    private var projectRootPath = "Documents/Inklings/${project.name}"
+    private var relativePath = "$projectRootPath/08 Dailies/01 Inbox"
     
-    val sessionFileName: String = generateSessionFileName()
+    // Requirement 17C: Store the specific date to ensure DA and BAS share the exact same timestamp.
+    private val sessionDate = Date()
+    val sessionFileName: String = generateSessionFileName(sessionDate)
     private var sessionUri: Uri? = null
 
     // Requirement 16: Track whether the main document has been successfully saved at least once.
@@ -29,13 +31,19 @@ class SessionManager(private val context: Context, val project: Project) {
         private set
 
     /**
-     * Requirement 32: Timestamp convention remains unchanged to maintain DA/BAS association.
+     * Requirement 32 & 17C: Timestamp convention remains unchanged to maintain DA/BAS association.
+     * Both files share the same timestamp derived from the session start.
      */
-    private fun generateSessionFileName(): String {
-        val now = Date()
+    private fun generateSessionFileName(date: Date): String {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd-EEE-HH_mm_ss", Locale.US)
-        val formattedDate = dateFormat.format(now).uppercase(Locale.US)
+        val formattedDate = dateFormat.format(date).uppercase(Locale.US)
         return "DA-$formattedDate.md"
+    }
+
+    private fun generateLogFileName(date: Date): String {
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd-EEE-HH_mm_ss", Locale.US)
+        val formattedDate = dateFormat.format(date).uppercase(Locale.US)
+        return "BAS-$formattedDate.md"
     }
 
     fun saveDocument(content: String): Result<Unit> {
@@ -56,21 +64,19 @@ class SessionManager(private val context: Context, val project: Project) {
     }
 
     /**
-     * Requirement 39: Existing log behavior remains intact, now stored under the Project path.
+     * Requirement 39 & 17C: Existing log behavior remains intact, now stored under the Project path.
+     * The BAS file uses the same timestamp as the DA file for association.
      */
     fun saveTimeLog(minutes: Int): Result<Unit> {
         return try {
-            val now = Date()
             val yearFormat = SimpleDateFormat("yyyy", Locale.US)
             val monthFormat = SimpleDateFormat("MM", Locale.US)
-            val fileTimestampFormat = SimpleDateFormat("yyyy-MM-dd - HH-mm-ss", Locale.US)
             
-            val year = yearFormat.format(now)
-            val month = monthFormat.format(now)
-            val fileTimestamp = fileTimestampFormat.format(now)
+            val year = yearFormat.format(sessionDate)
+            val month = monthFormat.format(sessionDate)
             
             val logRelativePath = "$projectRootPath/99 Operations/99 Log/$year/$month"
-            val logFileName = "BAS-$fileTimestamp.md"
+            val logFileName = generateLogFileName(sessionDate)
             val content = "dailying:: $minutes"
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -151,5 +157,127 @@ class SessionManager(private val context: Context, val project: Project) {
 
     fun getSessionFilePath(): String {
         return "$relativePath/$sessionFileName"
+    }
+
+    /**
+     * Requirement 17C: Move the currently open saved document and its BAS file to another project.
+     * Transactional: succeeds only if both move (or DA moves and BAS doesn't exist).
+     * Rejects if conflicts exist in target project.
+     */
+    fun moveSession(targetProject: Project): Result<Unit> {
+        if (!isDocumentSaved) return Result.failure(Exception("Document must be saved before moving"))
+
+        val targetRootPath = "Documents/Inklings/${targetProject.name}"
+        val targetDaPath = "$targetRootPath/08 Dailies/01 Inbox"
+        
+        val yearFormat = SimpleDateFormat("yyyy", Locale.US)
+        val monthFormat = SimpleDateFormat("MM", Locale.US)
+        val year = yearFormat.format(sessionDate)
+        val month = monthFormat.format(sessionDate)
+        val targetBasPath = "$targetRootPath/99 Operations/99 Log/$year/$month"
+        val logFileName = generateLogFileName(sessionDate)
+
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                moveWithMediaStore(targetProject, targetDaPath, targetBasPath, logFileName)
+            } else {
+                moveWithLegacyStorage(targetProject, targetDaPath, targetBasPath, logFileName)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun moveWithMediaStore(
+        targetProject: Project,
+        targetDaPath: String,
+        targetBasPath: String,
+        logFileName: String
+    ): Result<Unit> {
+        val resolver = context.contentResolver
+        
+        // 1. Check for conflicts
+        if (findExistingUri(sessionFileName, targetDaPath) != null) {
+            return Result.failure(Exception("Target file already exists in ${targetProject.name}"))
+        }
+        if (findExistingUri(logFileName, targetBasPath) != null) {
+            return Result.failure(Exception("Target log file already exists in ${targetProject.name}"))
+        }
+
+        // 2. Identify Source Files
+        val daUri = sessionUri ?: findExistingUri(sessionFileName, relativePath)
+            ?: return Result.failure(Exception("Source document not found"))
+        
+        val basSourcePath = "$projectRootPath/99 Operations/99 Log/${SimpleDateFormat("yyyy", Locale.US).format(sessionDate)}/${SimpleDateFormat("MM", Locale.US).format(sessionDate)}"
+        val basUri = findExistingUri(logFileName, basSourcePath)
+
+        // 3. Move DA
+        val daValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.RELATIVE_PATH, targetDaPath)
+        }
+        if (resolver.update(daUri, daValues, null, null) <= 0) {
+            return Result.failure(Exception("Failed to move document"))
+        }
+
+        // 4. Move BAS if exists
+        if (basUri != null) {
+            val basValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, targetBasPath)
+            }
+            if (resolver.update(basUri, basValues, null, null) <= 0) {
+                // Rollback DA move (optional but good for consistency)
+                daValues.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                resolver.update(daUri, daValues, null, null)
+                return Result.failure(Exception("Failed to move associated log file"))
+            }
+        }
+
+        // 5. Update State
+        updateInternalPaths(targetProject)
+        sessionUri = daUri
+        return Result.success(Unit)
+    }
+
+    private fun moveWithLegacyStorage(
+        targetProject: Project,
+        targetDaPath: String,
+        targetBasPath: String,
+        logFileName: String
+    ): Result<Unit> {
+        val rootDir = Environment.getExternalStorageDirectory()
+        val sourceDaFile = File(rootDir, "$relativePath/$sessionFileName")
+        val targetDaFile = File(rootDir, "$targetDaPath/$sessionFileName")
+        
+        val basSourcePath = "$projectRootPath/99 Operations/99 Log/${SimpleDateFormat("yyyy", Locale.US).format(sessionDate)}/${SimpleDateFormat("MM", Locale.US).format(sessionDate)}"
+        val sourceBasFile = File(rootDir, "$basSourcePath/$logFileName")
+        val targetBasFile = File(rootDir, "$targetBasPath/$logFileName")
+
+        // 1. Check conflicts
+        if (targetDaFile.exists()) return Result.failure(Exception("Target file already exists"))
+        if (sourceBasFile.exists() && targetBasFile.exists()) return Result.failure(Exception("Target log file already exists"))
+
+        // 2. Ensure target directories
+        File(rootDir, targetDaPath).mkdirs()
+        if (sourceBasFile.exists()) File(rootDir, targetBasPath).mkdirs()
+
+        // 3. Move files
+        if (!sourceDaFile.renameTo(targetDaFile)) return Result.failure(Exception("Failed to move document"))
+        
+        if (sourceBasFile.exists()) {
+            if (!sourceBasFile.renameTo(targetBasFile)) {
+                // Rollback DA
+                targetDaFile.renameTo(sourceDaFile)
+                return Result.failure(Exception("Failed to move log file"))
+            }
+        }
+
+        updateInternalPaths(targetProject)
+        return Result.success(Unit)
+    }
+
+    private fun updateInternalPaths(newProject: Project) {
+        this.project = newProject
+        this.projectRootPath = "Documents/Inklings/${newProject.name}"
+        this.relativePath = "$projectRootPath/08 Dailies/01 Inbox"
     }
 }
