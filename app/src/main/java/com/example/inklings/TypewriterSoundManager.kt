@@ -84,15 +84,16 @@ class TypewriterSoundManager(private val context: Context) {
         consecutiveCount = 0
     }
 
-    /**
-     * Requirement 18: Play pop.mp3 exactly 3 times sequentially.
-     * Uses a short delay to ensure distinct pops.
-     */
     fun playPopThreeTimes(scope: CoroutineScope) {
-        if (popId == -1) return
+        android.util.Log.e("SoundManager", "playPopThreeTimes requested. popId: $popId")
+        if (popId == -1) {
+            android.util.Log.e("SoundManager", "popId is -1, sound might still be loading or failed to load")
+            return
+        }
         
         scope.launch {
-            repeat(3) {
+            repeat(3) { i ->
+                android.util.Log.e("SoundManager", "Playing pop #$i")
                 playSound(popId)
                 delay(1000) // Requirement 18: 1 second delay between pops
             }
@@ -101,10 +102,10 @@ class TypewriterSoundManager(private val context: Context) {
 
     private fun playSound(soundId: Int) {
         if (soundId != -1) {
-            android.util.Log.d("SoundManager", "Playing sound: $soundId")
+            android.util.Log.e("SoundManager", "Playing sound: $soundId")
             soundPool.play(soundId, 1f, 1f, 1, 0, 1f)
         } else {
-            android.util.Log.w("SoundManager", "Attempted to play invalid sound ID (-1)")
+            android.util.Log.e("SoundManager", "Attempted to play invalid sound ID (-1)")
         }
     }
 

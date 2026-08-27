@@ -388,12 +388,15 @@ class WritingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun startTimer() {
+        android.util.Log.e("WritingViewModel", "startTimer called. Current state: $timerState")
         if (timerState == TimerState.COMPLETED || remainingTimeMillis <= 0L) {
+            android.util.Log.e("WritingViewModel", "Resetting timer before start")
             resetTimer()
         }
         
         // Requirement 18: Play pop sound 3 times on fresh start (not resume).
         if (timerState == TimerState.STOPPED) {
+            android.util.Log.e("WritingViewModel", "Fresh start detected, triggering pops")
             soundManager.playPopThreeTimes(viewModelScope)
         }
         

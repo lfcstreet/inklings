@@ -24,10 +24,11 @@ class SessionManager(private val context: Context, var project: Project) {
     // Requirement 17C: Store the specific date to ensure DA and BAS share the exact same timestamp.
     private val sessionDate = Date()
     
-    // Requirement 18: Optional document title.
-    private var currentTitle: String? = null
+    // Requirement 18 & 17D-FIX-01: Document title.
+    // New sessions start with "TITLE" placeholder.
+    private var currentTitle: String = "TITLE"
     
-    // Requirement 17D & 18: Filename uses the project's documentPrefix and optional title.
+    // Requirement 17D & 18 & 17D-FIX-01: Filename uses project prefix, date, weekday, title and time.
     var sessionFileName: String = generateSessionFileName(sessionDate, project.documentPrefix, currentTitle)
         private set
     private var sessionUri: Uri? = null
@@ -38,22 +39,26 @@ class SessionManager(private val context: Context, var project: Project) {
         private set
 
     /**
-     * Requirement 32 & 17C & 17D & 18: Timestamp convention remains unchanged.
-     * Prefix is now configurable per project.
-     * Optional title is inserted between the Day and Time.
+     * Requirement 32 & 17C & 17D & 18 & 17D-FIX-01: New filename format logic.
+     * format: [PREFIX-]YYYY-MM-DD, Ddd - TITLE - HH_MM_SS.md
+     * Weekdays: Mon, Tue, Wed, Thu, Fri, Sat, Sun.
      */
-    private fun generateSessionFileName(date: Date, prefix: String, title: String?): String {
-        val datePart = SimpleDateFormat("yyyy-MM-dd-EEE", Locale.US).format(date).uppercase(Locale.US)
-        val timePart = SimpleDateFormat("HH_mm_ss", Locale.US).format(date)
+    private fun generateSessionFileName(date: Date, prefix: String, title: String): String {
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val weekdayFormat = SimpleDateFormat("EEE", Locale.US) // e.g. "Mon"
+        val timeFormat = SimpleDateFormat("HH_mm_ss", Locale.US)
         
-        return if (title.isNullOrBlank()) {
-            "$prefix-$datePart-$timePart.md"
-        } else {
-            "$prefix-$datePart-$title-$timePart.md"
-        }
+        val datePart = dateFormat.format(date)
+        val weekdayPart = weekdayFormat.format(date) // Already "Mon", "Tue" etc.
+        val timePart = timeFormat.format(date)
+        
+        val prefixPart = if (prefix.isBlank()) "" else "$prefix-"
+        
+        return "$prefixPart$datePart, $weekdayPart - $title - $timePart.md"
     }
 
     private fun generateLogFileName(date: Date, prefix: String): String {
+        // Requirement 17D-FIX-01: BAS/log filename format remains unchanged.
         val dateFormat = SimpleDateFormat("yyyy-MM-dd-EEE-HH_mm_ss", Locale.US)
         val formattedDate = dateFormat.format(date).uppercase(Locale.US)
         return "$prefix-$formattedDate.md"
@@ -176,9 +181,9 @@ class SessionManager(private val context: Context, var project: Project) {
     }
 
     /**
-     * Requirement 17C & 17D & 18: Move the currently open saved document and its BAS file to another project.
+     * Requirement 17C & 17D & 18 & 17D-FIX-01: Move session to another project.
      * Adopts the target project's configured subfolders and prefixes.
-     * Preserves optional title.
+     * Preserves current title.
      */
     fun moveSession(targetProject: Project): Result<Unit> {
         if (!isDocumentSaved) return Result.failure(Exception("Document must be saved before moving"))
@@ -302,9 +307,9 @@ class SessionManager(private val context: Context, var project: Project) {
     }
 
     /**
-     * Requirement 18: Rename the currently saved Markdown document.
-     * Only works if document has been saved.
-     * Preserves original session timestamp and project prefix.
+     * Requirement 18 & 17D-FIX-01: Rename the currently saved Markdown document.
+     * Replaces the TITLE component in the new filename format.
+     * Preserves prefix, date, weekday, and time.
      */
     fun renameDocument(newTitle: String): Result<Unit> {
         if (!isDocumentSaved) return Result.failure(Exception("Only saved documents can be renamed"))
@@ -318,6 +323,8 @@ class SessionManager(private val context: Context, var project: Project) {
             return Result.failure(Exception("Title contains invalid characters"))
         }
 
+        // Requirement 17D-FIX-01: Centralized logic to construct the new filename.
+        // We reuse the sessionDate and current project's prefix.
         val nextFileName = generateSessionFileName(sessionDate, project.documentPrefix, trimmedTitle)
         if (nextFileName == sessionFileName) return Result.success(Unit) // No change
 

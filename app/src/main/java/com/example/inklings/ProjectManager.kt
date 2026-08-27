@@ -156,7 +156,7 @@ class ProjectManager(private val context: Context) {
                 isDefault = json.optBoolean("isDefault", false),
                 documentSubfolder = json.optString("documentSubfolder", "08 Dailies/01 Inbox").ifEmpty { "08 Dailies/01 Inbox" },
                 logSubfolder = json.optString("logSubfolder", "99 Operations/99 Log").ifEmpty { "99 Operations/99 Log" },
-                documentPrefix = json.optString("documentPrefix", "DA").ifEmpty { "DA" },
+                documentPrefix = json.optString("documentPrefix", "DA"),
                 logPrefix = json.optString("logPrefix", "BAS").ifEmpty { "BAS" }
             )
         } catch (e: Exception) {
